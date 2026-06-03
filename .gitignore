@@ -1,0 +1,22 @@
+# Dipendenze
+node_modules/
+
+# Build
+dist/
+
+# Database locale (non committare dati personali)
+server/walletai.db
+server/walletai.db-shm
+server/walletai.db-wal
+
+# Variabili d'ambiente (contengono segreti)
+.env
+
+# IDE
+.idea/
+.vscode/
+*.DS_Store
+
+# Log
+*.log
+npm-debug.log*

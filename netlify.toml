@@ -1,0 +1,18 @@
+[build]
+  command   = "npm run build"
+  publish   = "dist"
+
+# Proxy /api/* → backend su Render (imposta VITE_API_URL nelle env vars Netlify)
+# Se usi il redirect proxy qui sotto, non serve VITE_API_URL nel codice.
+# Sostituisci l'URL con il tuo backend Render dopo il deploy.
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://SOSTITUISCI-CON-IL-TUO-BACKEND.onrender.com/api/:splat"
+  status = 200
+  force  = true
+
+# SPA fallback — tutte le route vanno a index.html
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
