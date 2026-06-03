@@ -2,7 +2,7 @@
   <img src="public/walletAI_logo.png" alt="WalletAI Logo" width="260"/>
 
   <h1>WalletAI</h1>
-  <p><strong>Gestione finanze personali con AI — in locale con Ollama o nel cloud con Groq/OpenRouter.</strong></p>
+  <p><strong>Personal finance management with AI — locally with Ollama or in the cloud with Groq/OpenRouter.</strong></p>
 
   <p>
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" />
@@ -16,117 +16,115 @@
 
 ---
 
-## Cos'è WalletAI
+## What is WalletAI
 
-WalletAI è un'app web full-stack per tenere traccia di entrate e uscite in modo naturale: scrivi una frase come `"sushi 22€ ieri"` oppure `"ricevuto stipendio 1200"` e l'app capisce automaticamente importo, categoria, tipo e data.
+WalletAI is a full-stack web app for tracking income and expenses naturally: type a phrase like `"sushi 22€ yesterday"` or `"received salary 1200"` and the app automatically understands the amount, category, type, and date.
 
-Il parsing avviene tramite un sistema a **3 livelli** che garantisce sempre un risultato: prima tenta con l'AI, poi con un dizionario di parole chiave italiane, infine propone un form manuale pre-compilato. L'AI può girare in locale con **Ollama** o nel cloud con **Groq** o **OpenRouter** (entrambi gratuiti) — stessa API, cambia solo l'URL nel `.env`.
+Parsing works through a **3-level system** that always guarantees a result: it first tries AI, then a keyword dictionary, and finally offers a pre-filled manual form. The AI can run locally with **Ollama** or in the cloud with **Groq** or **OpenRouter** (both free) — same API, just change the URL in `.env`.
 
 ---
 
+## Features
 
-
-## Funzionalità
-
-- **Autenticazione** — registrazione e login con JWT, password hashata con bcrypt
-- **Parsing AI a 3 livelli** — AI (Ollama/Groq/OpenRouter) → dizionario → form manuale
-- **Preview prima del salvataggio** — mostra i dati interpretati con badge fonte (AI / Auto / Manuale) e permette di correggere prima di confermare
-- **Profilo utente** — saldo attuale, budget iniziale modificabile, statistiche mensili
-- **Grafici CSS puri** — uscite per categoria e andamento degli ultimi 6 mesi, senza librerie esterne
-- **Dizionario personalizzabile** — aggiungi le tue parole chiave con categoria e tipo; vengono controllate per prime
-- **Filtri** — tutte le transazioni, solo entrate o solo uscite, con contatore per tab
-- **Riepilogo mensile** — navigazione mese per mese con grafico a barre e totali
-- **Esporta CSV** — scarica tutte le transazioni in un click
-- **Mobile-first** — bottom navigation bar, target di tocco 44 px, nessun zoom involontario su iOS, safe area per notch/Dynamic Island
+- **Authentication** — registration and login with JWT, password hashed with bcrypt
+- **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → dictionary → manual form
+- **Preview before saving** — shows parsed data with source badge (AI / Auto / Manual) and allows corrections before confirming
+- **User profile** — current balance, editable initial budget, monthly statistics
+- **Pure CSS charts** — expenses by category and last 6 months trend, no external libraries
+- **Customizable dictionary** — add your own keywords with category and type; they are checked first
+- **Filters** — all transactions, income only or expenses only, with tab counter
+- **Monthly summary** — month-by-month navigation with bar chart and totals
+- **CSV export** — download all transactions in one click
+- **Mobile-first** — bottom navigation bar, 44px touch targets, no accidental zoom on iOS, safe area for notch/Dynamic Island
 
 ---
 
 ## Tech Stack
 
-| Livello | Tecnologia |
-|---------|------------|
+| Layer | Technology |
+|-------|------------|
 | Frontend | React 18 + Vite 5 + React Router 6 |
 | Backend | Node.js + Express |
-| Database | SQLite via `better-sqlite3` (sincrono) |
-| Autenticazione | JWT (`jsonwebtoken`) + `bcryptjs` |
-| AI in locale | Ollama — qualsiasi modello LLM |
-| AI in cloud | Groq · OpenRouter (API OpenAI-compatible) |
-| Styling | CSS puro con variabili CSS, DM Sans + DM Serif Display |
+| Database | SQLite via `better-sqlite3` (synchronous) |
+| Authentication | JWT (`jsonwebtoken`) + `bcryptjs` |
+| Local AI | Ollama — any LLM model |
+| Cloud AI | Groq · OpenRouter (OpenAI-compatible API) |
+| Styling | Plain CSS with CSS variables, DM Sans + DM Serif Display |
 | Deploy | Frontend → Netlify · Backend → Render |
 
-Nessun framework CSS, nessuna UI library.
+No CSS framework, no UI library.
 
 ---
 
-## Sistema di Parsing a 3 Livelli
+## 3-Level Parsing System
 
-Il cuore dell'app. Ogni livello restituisce sempre lo stesso oggetto:
+The core of the app. Every level always returns the same object:
 
 ```json
 {
   "amount": 22,
   "type": "out",
   "description": "sushi",
-  "category": "cibo",
+  "category": "food",
   "date": "02/06/2026",
   "source": "ai | dictionary | manual",
   "confidence": "high | medium | low"
 }
 ```
 
-### Livello 1 — AI (Ollama · Groq · OpenRouter)
-Chiama l'endpoint `/v1/chat/completions` (formato OpenAI-compatible) con un timeout adattivo: **3 s** per Ollama locale, **8 s** per servizi cloud. Il prompt è in italiano e richiede risposta JSON pura. Se la chiamata fallisce o scade → livello successivo.
+### Level 1 — AI (Ollama · Groq · OpenRouter)
+Calls the `/v1/chat/completions` endpoint (OpenAI-compatible format) with an adaptive timeout: **3 s** for local Ollama, **8 s** for cloud services. The prompt is in Italian and expects a pure JSON response. If the call fails or times out → next level.
 
-### Livello 2 — Dizionario locale
-Oltre **150 parole chiave italiane** suddivise per categoria. Le **parole chiave personalizzate dell'utente** hanno priorità e vengono controllate per prime. Estrae importo con regex, riconosce date italiane (`ieri`, `lunedì`, `12/03`…) e costruisce una descrizione pulita rimuovendo le stopword.
+### Level 2 — Local dictionary
+Over **150 Italian keywords** organized by category. The **user's custom keywords** take priority and are checked first. Extracts amount via regex, recognizes Italian dates (`ieri/yesterday`, `lunedì/Monday`, `12/03`…) and builds a clean description by removing stopwords.
 
-### Livello 3 — Form manuale
-Se nessun pattern corrisponde, mostra un form pre-compilato con l'importo rilevato. Badge grigio "Manuale".
+### Level 3 — Manual form
+If no pattern matches, shows a pre-filled form with the detected amount. Grey "Manual" badge.
 
 ---
 
-## Struttura del Progetto
+## Project Structure
 
 ```
 walletai/
 ├── server/
-│   ├── index.js                  # Entry point Express
-│   ├── db.js                     # Init SQLite + schema
+│   ├── index.js                  # Express entry point
+│   ├── db.js                     # SQLite init + schema
 │   ├── middleware/
-│   │   └── auth.js               # Guard JWT
+│   │   └── auth.js               # JWT guard
 │   ├── routes/
 │   │   ├── auth.js               # /api/auth/*
 │   │   ├── transactions.js       # /api/transactions/*
 │   │   └── user.js               # /api/user/*
 │   └── utils/
-│       ├── parser.js             # Cascata parsing 3 livelli
-│       └── dateParser.js         # Date italiane → DD/MM/YYYY
+│       ├── parser.js             # 3-level parsing cascade
+│       └── dateParser.js         # Italian dates → DD/MM/YYYY
 ├── src/
 │   ├── main.jsx
-│   ├── App.jsx                   # Router + guardia auth
+│   ├── App.jsx                   # Router + auth guard
 │   ├── utils/
-│   │   └── api.js                # apiFetch centralizzato + VITE_API_URL
+│   │   └── api.js                # Centralized apiFetch + VITE_API_URL
 │   ├── pages/
-│   │   ├── LoginPage.jsx         # Accedi / Registrati
-│   │   ├── ProfilePage.jsx       # Statistiche + keywords + export CSV
-│   │   └── TransactionsPage.jsx  # Lista + AI input + riepilogo
+│   │   ├── LoginPage.jsx         # Sign in / Sign up
+│   │   ├── ProfilePage.jsx       # Stats + keywords + CSV export
+│   │   └── TransactionsPage.jsx  # List + AI input + summary
 │   ├── components/
 │   │   ├── NavBar.jsx            # Top bar (desktop) + Bottom nav (mobile)
-│   │   ├── WalletCard.jsx        # Card saldo — sfondo scuro
-│   │   ├── AIInput.jsx           # Input testo → preview → conferma/modifica
-│   │   ├── TransactionList.jsx   # Lista raggruppata per data
-│   │   ├── CategoryChart.jsx     # Barre CSS uscite per categoria
-│   │   ├── MonthlyChart.jsx      # Grafico CSS ultimi 6 mesi
-│   │   ├── MonthlySummary.jsx    # Riepilogo mensile collassabile
-│   │   └── KeywordManager.jsx    # CRUD parole chiave personalizzate
+│   │   ├── WalletCard.jsx        # Balance card — dark background
+│   │   ├── AIInput.jsx           # Text input → preview → confirm/edit
+│   │   ├── TransactionList.jsx   # List grouped by date
+│   │   ├── CategoryChart.jsx     # CSS bars by category
+│   │   ├── MonthlyChart.jsx      # CSS chart last 6 months
+│   │   ├── MonthlySummary.jsx    # Collapsible monthly summary
+│   │   └── KeywordManager.jsx    # Custom keyword CRUD
 │   └── styles/
-│       ├── global.css            # Variabili CSS, reset, classi base
-│       └── components.css        # Stili per componente + responsive
+│       ├── global.css            # CSS variables, reset, base classes
+│       └── components.css        # Component styles + responsive
 ├── public/
 │   └── walletAI_logo.png
 ├── index.html
-├── vite.config.js                # Proxy /api → :3001 in sviluppo
-├── netlify.toml                  # Build config + proxy API + SPA redirect
+├── vite.config.js                # Proxy /api → :3001 in development
+├── netlify.toml                  # Build config + API proxy + SPA redirect
 ├── .env.example
 ├── .gitignore
 └── package.json
@@ -134,7 +132,7 @@ walletai/
 
 ---
 
-## Schema Database
+## Database Schema
 
 ```sql
 CREATE TABLE users (
@@ -154,8 +152,8 @@ CREATE TABLE transactions (
   type        TEXT NOT NULL CHECK(type IN ('in','out')),
   description TEXT,
   category    TEXT,
-  date        TEXT,          -- formato DD/MM/YYYY
-  raw_input   TEXT,          -- testo originale inserito dall'utente
+  date        TEXT,          -- format DD/MM/YYYY
+  raw_input   TEXT,          -- original text entered by the user
   source      TEXT CHECK(source IN ('ai','dictionary','manual')),
   confidence  TEXT CHECK(confidence IN ('high','medium','low')),
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -176,71 +174,71 @@ CREATE TABLE user_keywords (
 ## API Reference
 
 ### Auth
-| Metodo | Endpoint | Body | Risposta |
+| Method | Endpoint | Body | Response |
 |--------|----------|------|----------|
 | POST | `/api/auth/register` | `{ username, email, password, full_name }` | `{ token, user }` |
 | POST | `/api/auth/login` | `{ username, password }` | `{ token, user }` |
 | GET  | `/api/auth/me` | — (Bearer token) | `{ user }` |
 
-### Transazioni
-| Metodo | Endpoint | Note |
-|--------|----------|------|
-| POST   | `/api/transactions/parse` | Parsifica il testo — non salva |
-| POST   | `/api/transactions` | Salva una transazione |
-| GET    | `/api/transactions` | Filtri: `?type=in\|out&month=YYYY-MM` |
+### Transactions
+| Method | Endpoint | Notes |
+|--------|----------|-------|
+| POST   | `/api/transactions/parse` | Parses text — does not save |
+| POST   | `/api/transactions` | Saves a transaction |
+| GET    | `/api/transactions` | Filters: `?type=in\|out&month=YYYY-MM` |
 | DELETE | `/api/transactions/:id` | |
-| GET    | `/api/transactions/summary` | Totali per categoria, mese corrente |
+| GET    | `/api/transactions/summary` | Totals by category, current month |
 
-### Utente
-| Metodo | Endpoint | Note |
-|--------|----------|------|
+### User
+| Method | Endpoint | Notes |
+|--------|----------|-------|
 | POST   | `/api/user/budget` | `{ initial_budget }` |
-| GET    | `/api/user/keywords` | Lista parole chiave |
+| GET    | `/api/user/keywords` | List custom keywords |
 | POST   | `/api/user/keywords` | `{ keyword, category, type }` |
 | DELETE | `/api/user/keywords/:id` | |
 
 ---
 
-## Avvio in locale
+## Running Locally
 
-### 1. Prerequisiti
+### 1. Prerequisites
 
 - Node.js 18+
-- [Ollama](https://ollama.com) installato e in esecuzione _(opzionale — puoi usare Groq/OpenRouter)_
+- [Ollama](https://ollama.com) installed and running _(optional — you can use Groq/OpenRouter instead)_
 
 ```bash
 ollama pull qwen2.5:7b
 ```
 
-### 2. Installazione
+### 2. Installation
 
 ```bash
-git clone https://github.com/tuo-username/walletai.git
-cd walletai
+git clone https://github.com/Ciccio1307/walletAI.git
+cd walletAI
 npm install
 cp .env.example .env
 ```
 
-### 3. Variabili d'ambiente (`.env`)
+### 3. Environment variables (`.env`)
 
-**Con Ollama locale:**
+**With local Ollama:**
 ```env
-JWT_SECRET=una_stringa_segreta_lunga
+JWT_SECRET=a_long_secret_string
 PORT=3001
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:7b
 ```
 
-**Con Groq (cloud gratuito):**
+**With Groq (free cloud):**
 ```env
-JWT_SECRET=una_stringa_segreta_lunga
+JWT_SECRET=a_long_secret_string
 PORT=3001
 OLLAMA_URL=https://api.groq.com/openai
 OLLAMA_MODEL=llama-3.1-8b-instant
-OLLAMA_API_KEY=gsk_la_tua_chiave   # da console.groq.com
+OLLAMA_API_KEY=gsk_your_key   # from console.groq.com
 ```
 
-### 4. Avvio
+### 4. Start
 
 ```bash
 npm run dev
@@ -251,65 +249,65 @@ npm run dev
 
 ---
 
-## Deploy su Netlify + Render
+## Deploy on Netlify + Render
 
-L'architettura di produzione:
+Production architecture:
 
 ```
-Browser / Cellulare
+Browser / Mobile
         │
         ▼
-https://walletai.netlify.app   ← frontend React (Netlify)
-        │  /api/* (proxy Netlify)
+https://walletai.netlify.app   ← React frontend (Netlify)
+        │  /api/* (Netlify proxy)
         ▼
-https://walletai.onrender.com  ← backend Express + SQLite (Render)
+https://walletai.onrender.com  ← Express backend + SQLite (Render)
         │
         ▼
-   Groq / OpenRouter           ← AI cloud gratuita
+   Groq / OpenRouter           ← Free cloud AI
 ```
 
-### Passo 1 — Ottieni una API key AI gratuita
+### Step 1 — Get a free AI API key
 
-Scegli uno dei due provider:
+Choose one of the two providers:
 
-| Provider | Registrazione | Modello consigliato | Limite free |
-|----------|--------------|--------------------|----|
-| **Groq** | [console.groq.com](https://console.groq.com) | `llama-3.1-8b-instant` | ~14.400 req/giorno |
-| **OpenRouter** | [openrouter.ai](https://openrouter.ai) | `qwen/qwen-2.5-7b-instruct:free` | crediti gratuiti |
+| Provider | Sign up | Recommended model | Free limit |
+|----------|---------|-------------------|------------|
+| **Groq** | [console.groq.com](https://console.groq.com) | `llama-3.1-8b-instant` | ~14,400 req/day |
+| **OpenRouter** | [openrouter.ai](https://openrouter.ai) | `qwen/qwen-2.5-7b-instruct:free` | free credits |
 
-### Passo 2 — Deploy del backend su Render
+### Step 2 — Deploy backend on Render
 
-1. Crea un account su [render.com](https://render.com)
-2. **New → Web Service** → connetti il repository GitHub
-3. Impostazioni del servizio:
+1. Create an account at [render.com](https://render.com)
+2. **New → Web Service** → connect your GitHub repository
+3. Service settings:
    - **Build command:** `npm install`
    - **Start command:** `node server/index.js`
    - **Environment:** Node
-4. Aggiungi queste variabili d'ambiente nel pannello Render:
+4. Add these environment variables in the Render dashboard:
 
 ```
-JWT_SECRET        = una_stringa_segreta_lunga_e_casuale
+JWT_SECRET        = a_long_random_secret_string
 PORT              = 3001
-ALLOWED_ORIGIN    = https://NOME-TUO-SITO.netlify.app
+ALLOWED_ORIGIN    = https://YOUR-SITE-NAME.netlify.app
 
-# Con Groq:
+# With Groq:
 OLLAMA_URL        = https://api.groq.com/openai
 OLLAMA_MODEL      = llama-3.1-8b-instant
 OLLAMA_API_KEY    = gsk_...
 
-# Oppure con OpenRouter:
+# Or with OpenRouter:
 # OLLAMA_URL      = https://openrouter.ai/api
 # OLLAMA_MODEL    = qwen/qwen-2.5-7b-instruct:free
 # OLLAMA_API_KEY  = sk-or-...
 ```
 
-5. Clicca **Deploy** → copia l'URL assegnato (es. `https://walletai-abc123.onrender.com`)
+5. Click **Deploy** → copy the assigned URL (e.g. `https://walletai-abc123.onrender.com`)
 
-> **Nota storage:** sul free tier di Render il disco è persistente ma si azzera ad ogni nuovo deploy da zero. Per dati permanenti considera il piano Starter ($7/mese) o esporta regolarmente il CSV.
+> **Storage note:** on Render's free tier the disk is persistent but resets on a fresh redeploy. Consider the Starter plan ($7/month) for permanent data, or export the CSV regularly.
 
-### Passo 3 — Configura `netlify.toml`
+### Step 3 — Update `netlify.toml`
 
-Apri `netlify.toml` e sostituisci l'URL placeholder con quello del tuo backend Render:
+Open `netlify.toml` and replace the placeholder URL with your Render backend URL:
 
 ```toml
 [[redirects]]
@@ -319,87 +317,87 @@ Apri `netlify.toml` e sostituisci l'URL placeholder con quello del tuo backend R
   force  = true
 ```
 
-### Passo 4 — Deploy del frontend su Netlify
+### Step 4 — Deploy frontend on Netlify
 
-1. Crea un account su [netlify.com](https://netlify.com)
-2. **Add new site → Import an existing project** → connetti il repository GitHub
-3. Impostazioni build:
+1. Create an account at [netlify.com](https://netlify.com)
+2. **Add new site → Import an existing project** → connect your GitHub repository
+3. Build settings:
    - **Build command:** `npm run build`
    - **Publish directory:** `dist`
-4. Clicca **Deploy site**
+4. Click **Deploy site**
 
-Il file `netlify.toml` gestisce automaticamente:
-- Il proxy da `/api/*` al backend Render (nessun problema CORS)
-- Il redirect SPA (`/*` → `index.html`) per React Router
+The `netlify.toml` file automatically handles:
+- Proxying `/api/*` to the Render backend (no CORS issues)
+- SPA redirect (`/*` → `index.html`) for React Router
 
 ---
 
-## Modelli AI compatibili
+## Compatible AI Models
 
-### Locali (Ollama)
+### Local (Ollama)
 
-| Modello | Qualità | RAM |
-|---------|---------|-----|
-| `qwen2.5:7b` | ⭐⭐⭐ Consigliato | ~5 GB |
+| Model | Quality | RAM |
+|-------|---------|-----|
+| `qwen2.5:7b` | ⭐⭐⭐ Recommended | ~5 GB |
 | `llama3.1:8b` | ⭐⭐⭐ | ~6 GB |
 | `mistral:7b` | ⭐⭐ | ~5 GB |
-| `phi3:mini` | ⭐ Leggero | ~2 GB |
+| `phi3:mini` | ⭐ Lightweight | ~2 GB |
 
-### Cloud gratuiti
+### Free cloud
 
-| Modello | Provider | Note |
-|---------|----------|------|
-| `llama-3.1-8b-instant` | Groq | Velocissimo, consigliato in produzione |
-| `llama-3.3-70b-versatile` | Groq | Qualità massima, più lento |
-| `qwen/qwen-2.5-7b-instruct:free` | OpenRouter | Stesso modello di Ollama locale |
-| `mistralai/mistral-7b-instruct:free` | OpenRouter | Alternativa leggera |
+| Model | Provider | Notes |
+|-------|----------|-------|
+| `llama-3.1-8b-instant` | Groq | Very fast, recommended for production |
+| `llama-3.3-70b-versatile` | Groq | Best quality, slower |
+| `qwen/qwen-2.5-7b-instruct:free` | OpenRouter | Same model as local Ollama |
+| `mistralai/mistral-7b-instruct:free` | OpenRouter | Lightweight alternative |
 
-Per cambiare modello: modifica `OLLAMA_MODEL` nel `.env` (locale) o nelle variabili d'ambiente Render (produzione).
+To change the model: edit `OLLAMA_MODEL` in `.env` (local) or in the Render environment variables (production).
 
 ---
 
 ## Design System
 
 ```css
---bg:     #F5F2EE   /* sfondo caldo */
---card:   #FFFFFF   /* card bianche */
---ink:    #1A1714   /* testo principale */
---muted:  #7A7570   /* testo secondario */
---teal:   #1D9E75   /* verde — entrate e azioni primarie */
---red:    #C53030   /* rosso — uscite e errori */
+--bg:     #F5F2EE   /* warm background */
+--card:   #FFFFFF   /* white cards */
+--ink:    #1A1714   /* main text */
+--muted:  #7A7570   /* secondary text */
+--teal:   #1D9E75   /* green — income and primary actions */
+--red:    #C53030   /* red — expenses and errors */
 ```
 
-Font: **DM Sans** (interfaccia) + **DM Serif Display** (numeri e titoli) via Google Fonts.
+Fonts: **DM Sans** (UI) + **DM Serif Display** (numbers and headings) via Google Fonts.
 
 ---
 
-## Categorie supportate
+## Supported Categories
 
-| Emoji | Categoria | Tipo | Esempi parole chiave |
-|-------|-----------|------|----------------------|
-| 🍽️ | cibo | uscita | sushi, pizza, supermercato, bar, colazione |
-| 🚗 | trasporti | uscita | benzina, treno, uber, parcheggio, pedaggio |
-| 💊 | salute | uscita | farmacia, dentista, palestra, medico |
-| 🎮 | svago | uscita | netflix, cinema, spotify, videogioco |
-| 🎁 | regali | uscita | regalo, compleanno, fiori, natale |
-| 🏠 | casa | uscita | affitto, bolletta, ikea, internet |
-| 🛍️ | shopping | uscita | zara, amazon, scarpe, telefono |
-| 💼 | lavoro | uscita | corso, università, abbonamento lavoro |
-| 💰 | entrata | entrata | stipendio, bonifico, freelance, rimborso |
-| 📦 | altro | uscita | tutto il resto |
-
----
-
-## Licenza
-
-MIT — libero di usare, modificare e distribuire.
+| Emoji | Category | Type | Example keywords |
+|-------|----------|------|-----------------|
+| 🍽️ | food | expense | sushi, pizza, supermarket, bar, breakfast |
+| 🚗 | transport | expense | petrol, train, uber, parking, toll |
+| 💊 | health | expense | pharmacy, dentist, gym, doctor |
+| 🎮 | leisure | expense | netflix, cinema, spotify, videogame |
+| 🎁 | gifts | expense | gift, birthday, flowers, christmas |
+| 🏠 | home | expense | rent, bill, ikea, internet |
+| 🛍️ | shopping | expense | zara, amazon, shoes, phone |
+| 💼 | work | expense | course, university, work subscription |
+| 💰 | income | income | salary, bank transfer, freelance, refund |
+| 📦 | other | expense | everything else |
 
 ---
 
-## Contribuire
+## License
 
-Pull request benvenute. Apri prima una issue per discutere cambiamenti significativi.
+MIT — free to use, modify and distribute.
 
 ---
 
-_WalletAI — Finanze personali con AI, in locale o nel cloud._
+## Contributing
+
+Pull requests are welcome. Please open an issue first to discuss significant changes.
+
+---
+
+_WalletAI — Personal finance with AI, locally or in the cloud._
