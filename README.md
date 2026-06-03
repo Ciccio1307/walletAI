@@ -24,15 +24,7 @@ Il parsing avviene tramite un sistema a **3 livelli** che garantisce sempre un r
 
 ---
 
-## Screenshot
 
-> _Aggiungi screenshot dell'app dopo il primo avvio._
-
-| Login | Transazioni | Profilo |
-|-------|-------------|---------|
-| _screenshot_ | _screenshot_ | _screenshot_ |
-
----
 
 ## Funzionalità
 
