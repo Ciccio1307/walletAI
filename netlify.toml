@@ -7,7 +7,7 @@
 # Sostituisci l'URL con il tuo backend Render dopo il deploy.
 [[redirects]]
   from   = "/api/*"
-  to     = "https://SOSTITUISCI-CON-IL-TUO-BACKEND.onrender.com/api/:splat"
+  to     = "https://walletai-backend.onrender.com/api/:splat"
   status = 200
   force  = true
 
