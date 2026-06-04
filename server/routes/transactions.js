@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { parseTransaction } from '../utils/parser.js';
+import { saveBackup } from '../utils/backup.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -29,6 +30,7 @@ router.post('/', (req, res) => {
   ).run(req.userId, amount, type, description || '', category || 'altro', date, raw_input || '', source || 'manual', confidence || 'low');
 
   const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(result.lastInsertRowid);
+  saveBackup();
   res.status(201).json(tx);
 });
 
@@ -59,6 +61,7 @@ router.delete('/:id', (req, res) => {
   if (!tx) return res.status(404).json({ error: 'Transazione non trovata' });
 
   db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
+  saveBackup();
   res.json({ ok: true });
 });
 

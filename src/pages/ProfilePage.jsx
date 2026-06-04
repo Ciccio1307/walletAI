@@ -78,16 +78,17 @@ export default function ProfilePage() {
   }
 
   function exportCSV() {
-    const header = 'Data,Descrizione,Categoria,Tipo,Importo';
+    const meta = `#BACKUP,"${(user.username||'').replace(/"/g,'""')}","${(user.email||'').replace(/"/g,'""')}","${(user.full_name||'').replace(/"/g,'""')}",${user.initial_budget||0}`;
+    const header = 'data,descrizione,categoria,tipo,importo,source,confidence,raw_input';
     const rows = transactions.map(t =>
-      `${t.date},"${(t.description || '').replace(/"/g, '""')}",${t.category},${t.type === 'in' ? 'entrata' : 'uscita'},${t.amount}`
+      `${t.date},"${(t.description||'').replace(/"/g,'""')}",${t.category},${t.type},${t.amount},${t.source||'manual'},${t.confidence||'low'},"${(t.raw_input||'').replace(/"/g,'""')}"`
     );
-    const csv = [header, ...rows].join('\n');
+    const csv = [meta, header, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'walletai_transazioni.csv';
+    a.download = 'walletai_backup.csv';
     a.click();
     URL.revokeObjectURL(url);
   }

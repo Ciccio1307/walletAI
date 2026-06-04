@@ -34,7 +34,8 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 - **Customizable dictionary** — add your own keywords with category and type; they are checked first
 - **Filters** — all transactions, income only or expenses only, with tab counter
 - **Monthly summary** — month-by-month navigation with bar chart and totals
-- **CSV export** — download all transactions in one click
+- **CSV export & restore** — export a full backup (account + transactions); restore everything from the login page with one click
+- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically
 - **Mobile-first** — bottom navigation bar, 44px touch targets, no accidental zoom on iOS, safe area for notch/Dynamic Island
 
 ---
@@ -98,7 +99,8 @@ walletai/
 │   │   └── user.js               # /api/user/*
 │   └── utils/
 │       ├── parser.js             # 3-level parsing cascade
-│       └── dateParser.js         # Italian dates → DD/MM/YYYY
+│       ├── dateParser.js         # Italian dates → DD/MM/YYYY
+│       └── backup.js             # Auto backup/restore via GitHub Gist
 ├── src/
 │   ├── main.jsx
 │   ├── App.jsx                   # Router + auth guard
@@ -299,11 +301,13 @@ OLLAMA_API_KEY    = gsk_...
 # OLLAMA_URL      = https://openrouter.ai/api
 # OLLAMA_MODEL    = qwen/qwen-2.5-7b-instruct:free
 # OLLAMA_API_KEY  = sk-or-...
+
+# Auto backup (optional but recommended — see section below):
+GITHUB_TOKEN      = ghp_...
+GITHUB_GIST_ID    = (leave empty on first deploy, fill after)
 ```
 
 5. Click **Deploy** → copy the assigned URL (e.g. `https://walletai-abc123.onrender.com`)
-
-> **Storage note:** on Render's free tier the disk is persistent but resets on a fresh redeploy. Consider the Starter plan ($7/month) for permanent data, or export the CSV regularly.
 
 ### Step 3 — Update `netlify.toml`
 
@@ -329,6 +333,33 @@ Open `netlify.toml` and replace the placeholder URL with your Render backend URL
 The `netlify.toml` file automatically handles:
 - Proxying `/api/*` to the Render backend (no CORS issues)
 - SPA redirect (`/*` → `index.html`) for React Router
+
+---
+
+## Persistent Data on Render Free Tier
+
+Render's free tier resets the filesystem on every redeploy. WalletAI solves this with an **automatic GitHub Gist backup**: every write (transaction, keyword, budget) is mirrored to a private Gist; on startup, if the database is empty, the data is restored automatically.
+
+### Setup (one-time)
+
+**1. Create a GitHub Personal Access Token**
+- Go to https://github.com/settings/tokens → **Generate new token (classic)**
+- Enable only the **`gist`** scope → copy the token
+
+**2. Add to Render environment variables:**
+```
+GITHUB_TOKEN   = ghp_your_token_here
+GITHUB_GIST_ID = (leave empty for now)
+```
+
+**3. Deploy.** On first startup the server logs:
+```
+[backup] Gist created — add to Render: GITHUB_GIST_ID=abc123def456...
+```
+
+**4.** Copy that ID and add `GITHUB_GIST_ID` to Render env vars. From now on every redeploy restores the database automatically — no manual steps needed.
+
+> If `GITHUB_TOKEN` is not set the backup is silently skipped and the app works normally.
 
 ---
 

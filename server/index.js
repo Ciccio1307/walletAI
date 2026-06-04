@@ -4,6 +4,9 @@ import cors from 'cors';
 import authRoutes from './routes/auth.js';
 import transactionRoutes from './routes/transactions.js';
 import userRoutes from './routes/user.js';
+import { restoreBackup } from './utils/backup.js';
+
+await restoreBackup();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
