@@ -12,6 +12,10 @@
     <img src="https://img.shields.io/badge/AI-Ollama%20%7C%20Groq%20%7C%20OpenRouter-black" />
     <img src="https://img.shields.io/badge/Deploy-Netlify%20%2B%20Render-00C7B7?logo=netlify&logoColor=white" />
   </p>
+
+  <p>
+    <a href="https://walletaifv.netlify.app"><strong>🌐 Live Demo → walletaifv.netlify.app</strong></a>
+  </p>
 </div>
 
 ---
