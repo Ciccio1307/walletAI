@@ -1,7 +1,7 @@
 import db from '../db.js';
 
 const TOKEN = process.env.GITHUB_TOKEN;
-const GIST_ID = process.env.GITHUB_GIST_ID;
+let gistId   = process.env.GITHUB_GIST_ID;
 const FILENAME = 'walletai_backup.json';
 
 export async function saveBackup() {
@@ -12,8 +12,8 @@ export async function saveBackup() {
     const keywords     = db.prepare('SELECT * FROM user_keywords').all();
     const content      = JSON.stringify({ users, transactions, keywords });
 
-    const url    = GIST_ID ? `https://api.github.com/gists/${GIST_ID}` : 'https://api.github.com/gists';
-    const method = GIST_ID ? 'PATCH' : 'POST';
+    const url    = gistId ? `https://api.github.com/gists/${gistId}` : 'https://api.github.com/gists';
+    const method = gistId ? 'PATCH' : 'POST';
 
     const res = await fetch(url, {
       method,
@@ -21,9 +21,10 @@ export async function saveBackup() {
       body: JSON.stringify({ description: 'WalletAI backup', public: false, files: { [FILENAME]: { content } } }),
     });
 
-    if (!GIST_ID && res.ok) {
+    if (!gistId && res.ok) {
       const data = await res.json();
-      console.log(`[backup] Gist creato — aggiungi a Render: GITHUB_GIST_ID=${data.id}`);
+      gistId = data.id;
+      console.log(`[backup] Gist creato — aggiungi a Render: GITHUB_GIST_ID=${gistId}`);
     }
   } catch (err) {
     console.error('[backup] saveBackup error:', err.message);
@@ -31,12 +32,12 @@ export async function saveBackup() {
 }
 
 export async function restoreBackup() {
-  if (!TOKEN || !GIST_ID) return;
+  if (!TOKEN || !gistId) return;
   try {
     const userCount = db.prepare('SELECT COUNT(*) as n FROM users').get().n;
     if (userCount > 0) return;
 
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
       headers: { 'Authorization': `Bearer ${TOKEN}` },
     });
     if (!res.ok) return;
