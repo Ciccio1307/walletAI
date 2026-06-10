@@ -35,6 +35,8 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+
   CREATE TABLE IF NOT EXISTS user_keywords (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,

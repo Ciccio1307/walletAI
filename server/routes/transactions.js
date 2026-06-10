@@ -23,6 +23,12 @@ router.post('/', (req, res) => {
   if (!amount || !type || !date) {
     return res.status(400).json({ error: 'Campi obbligatori: amount, type, date' });
   }
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'amount deve essere un numero maggiore di 0' });
+  }
+  if (type !== 'in' && type !== 'out') {
+    return res.status(400).json({ error: "type deve essere 'in' o 'out'" });
+  }
 
   const result = db.prepare(
     `INSERT INTO transactions (user_id, amount, type, description, category, date, raw_input, source, confidence)

@@ -31,6 +31,7 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 ## Features
 
 - **Authentication** — registration and login with JWT, password hashed with bcrypt
+- **Hardened API** — rate limiting on auth endpoints (5 req/min, brute-force protection), secure HTTP headers via helmet, strict input validation
 - **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → dictionary → manual form
 - **Preview before saving** — shows parsed data with source badge (AI / Auto / Manual) and allows corrections before confirming
 - **User profile** — current balance, editable initial budget, monthly statistics
@@ -38,8 +39,8 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 - **Customizable dictionary** — add your own keywords with category and type; they are checked first
 - **Filters** — all transactions, income only or expenses only, with tab counter
 - **Monthly summary** — month-by-month navigation with bar chart and totals
-- **CSV export & restore** — export a full backup (account + transactions); restore everything from the login page with one click
-- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically
+- **CSV export** — download all transactions including account metadata for emergency recovery
+- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically with zero manual steps
 - **Mobile-first** — bottom navigation bar, 44px touch targets, no accidental zoom on iOS, safe area for notch/Dynamic Island
 
 ---
@@ -127,10 +128,12 @@ walletai/
 │       ├── global.css            # CSS variables, reset, base classes
 │       └── components.css        # Component styles + responsive
 ├── public/
-│   └── walletAI_logo.png
+│   ├── walletAI_logo.png
+│   └── _redirects                # Netlify proxy + SPA fallback rules
 ├── index.html
 ├── vite.config.js                # Proxy /api → :3001 in development
-├── netlify.toml                  # Build config + API proxy + SPA redirect
+├── netlify.toml                  # Build config
+├── .nvmrc                        # Node.js version pin (v20)
 ├── .env.example
 ├── .gitignore
 └── package.json
@@ -203,13 +206,18 @@ CREATE TABLE user_keywords (
 | POST   | `/api/user/keywords` | `{ keyword, category, type }` |
 | DELETE | `/api/user/keywords/:id` | |
 
+### Health
+| Method | Endpoint | Notes |
+|--------|----------|-------|
+| GET    | `/api/health` | `{ "status": "ok" }` — no auth, used as Render health check |
+
 ---
 
 ## Running Locally
 
 ### 1. Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - [Ollama](https://ollama.com) installed and running _(optional — you can use Groq/OpenRouter instead)_
 
 ```bash
@@ -263,10 +271,10 @@ Production architecture:
 Browser / Mobile
         │
         ▼
-https://walletai.netlify.app   ← React frontend (Netlify)
+https://walletaifv.netlify.app   ← React frontend (Netlify)
         │  /api/* (Netlify proxy)
         ▼
-https://walletai.onrender.com  ← Express backend + SQLite (Render)
+https://walletai-backend.onrender.com  ← Express backend + SQLite (Render)
         │
         ▼
    Groq / OpenRouter           ← Free cloud AI
@@ -286,14 +294,16 @@ Choose one of the two providers:
 1. Create an account at [render.com](https://render.com)
 2. **New → Web Service** → connect your GitHub repository
 3. Service settings:
-   - **Build command:** `npm install`
+   - **Build command:** `npm install && npm rebuild better-sqlite3`
    - **Start command:** `node server/index.js`
    - **Environment:** Node
+   - **Health Check Path:** `/api/health` _(optional, recommended)_
 4. Add these environment variables in the Render dashboard:
 
 ```
 JWT_SECRET        = a_long_random_secret_string
 PORT              = 3001
+NODE_VERSION      = 20
 ALLOWED_ORIGIN    = https://YOUR-SITE-NAME.netlify.app
 
 # With Groq:
@@ -313,28 +323,23 @@ GITHUB_GIST_ID    = (leave empty on first deploy, fill after)
 
 5. Click **Deploy** → copy the assigned URL (e.g. `https://walletai-abc123.onrender.com`)
 
-### Step 3 — Update `netlify.toml`
+### Step 3 — Update `public/_redirects`
 
-Open `netlify.toml` and replace the placeholder URL with your Render backend URL:
+Open `public/_redirects` and replace the backend URL with your Render URL:
 
-```toml
-[[redirects]]
-  from   = "/api/*"
-  to     = "https://walletai-abc123.onrender.com/api/:splat"
-  status = 200
-  force  = true
+```
+/api/*  https://walletai-abc123.onrender.com/api/:splat  200
+/*      /index.html   200
 ```
 
 ### Step 4 — Deploy frontend on Netlify
 
 1. Create an account at [netlify.com](https://netlify.com)
-2. **Add new site → Import an existing project** → connect your GitHub repository
-3. Build settings:
-   - **Build command:** `npm run build`
-   - **Publish directory:** `dist`
-4. Click **Deploy site**
+2. Run `npm run build` locally — this generates the `dist/` folder
+3. Go to [app.netlify.com](https://app.netlify.com) → **Add new site → Deploy manually**
+4. Drag and drop the `dist/` folder into the Netlify dashboard
 
-The `netlify.toml` file automatically handles:
+The `public/_redirects` file (copied into `dist/` by Vite) handles:
 - Proxying `/api/*` to the Render backend (no CORS issues)
 - SPA redirect (`/*` → `index.html`) for React Router
 
@@ -356,9 +361,9 @@ GITHUB_TOKEN   = ghp_your_token_here
 GITHUB_GIST_ID = (leave empty for now)
 ```
 
-**3. Deploy.** On first startup the server logs:
+**3. Deploy.** On first transaction saved, the server logs:
 ```
-[backup] Gist created — add to Render: GITHUB_GIST_ID=abc123def456...
+[backup] Gist creato — aggiungi a Render: GITHUB_GIST_ID=abc123def456...
 ```
 
 **4.** Copy that ID and add `GITHUB_GIST_ID` to Render env vars. From now on every redeploy restores the database automatically — no manual steps needed.
