@@ -158,7 +158,11 @@ function tryDictionary(text, userKeywords = []) {
   // Built-in patterns
   for (const pattern of PATTERNS) {
     for (const kw of pattern.keywords) {
-      if (lower.includes(kw)) {
+      // Use word-boundary match for short keywords to avoid false substring hits
+      const matched = kw.length <= 4
+        ? new RegExp(`(^|\\s)${kw}(\\s|$)`).test(lower)
+        : lower.includes(kw);
+      if (matched) {
         const amount = extractAmount(text);
         if (!amount) continue;
         return {
@@ -176,6 +180,8 @@ function tryDictionary(text, userKeywords = []) {
 
   return null;
 }
+
+export { extractAmount, buildDescription, tryDictionary };
 
 export async function parseTransaction(text, userKeywords = []) {
   // Level 1: Ollama

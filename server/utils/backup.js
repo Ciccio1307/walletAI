@@ -54,8 +54,8 @@ export async function restoreBackup() {
           .run(u.id, u.username, u.email, u.password_hash, u.full_name, u.initial_budget, u.created_at);
       }
       for (const t of transactions) {
-        db.prepare('INSERT OR IGNORE INTO transactions (id,user_id,amount,type,description,category,date,raw_input,source,confidence,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-          .run(t.id, t.user_id, t.amount, t.type, t.description, t.category, t.date, t.raw_input, t.source, t.confidence, t.created_at);
+        db.prepare('INSERT OR IGNORE INTO transactions (id,user_id,amount,type,description,category,date,raw_input,source,confidence,created_at,recurring) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(t.id, t.user_id, t.amount, t.type, t.description, t.category, t.date, t.raw_input, t.source, t.confidence, t.created_at, t.recurring ?? 0);
       }
       for (const k of keywords) {
         db.prepare('INSERT OR IGNORE INTO user_keywords (id,user_id,keyword,category,type,created_at) VALUES (?,?,?,?,?,?)')

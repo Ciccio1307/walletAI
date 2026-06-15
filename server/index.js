@@ -6,7 +6,9 @@ import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth.js';
 import transactionRoutes from './routes/transactions.js';
 import userRoutes from './routes/user.js';
+import goalRoutes from './routes/goals.js';
 import { restoreBackup } from './utils/backup.js';
+import { logger } from './utils/logger.js';
 
 await restoreBackup();
 
@@ -16,7 +18,20 @@ const PORT = process.env.PORT || 3001;
 // Su Render le richieste passano da un proxy: serve per avere il vero IP
 // del client in req.ip (usato dal rate limiter)
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      connectSrc: ["'self'"],
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+      scriptSrc: ["'none'"],
+      styleSrc: ["'none'"],
+    },
+  },
+  referrerPolicy: { policy: 'no-referrer' },
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+}));
 
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -48,7 +63,8 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/goals', goalRoutes);
 
 app.listen(PORT, () => {
-  console.log(`WalletAI server running on http://localhost:${PORT}`);
+  logger.info(`WalletAI server running on http://localhost:${PORT}`);
 });

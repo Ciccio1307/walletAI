@@ -36,6 +36,7 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_transactions_date     ON transactions(date);
 
   CREATE TABLE IF NOT EXISTS user_keywords (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +44,30 @@ db.exec(`
     keyword TEXT NOT NULL,
     category TEXT NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('in','out')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// Safe migrations for columns added after initial schema creation
+try { db.exec('ALTER TABLE transactions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0'); } catch {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS category_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    budget_amount REAL NOT NULL,
+    UNIQUE(user_id, category),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    target_amount REAL NOT NULL,
+    current_amount REAL NOT NULL DEFAULT 0,
+    deadline TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );

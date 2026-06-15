@@ -11,6 +11,7 @@
     <img src="https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white" />
     <img src="https://img.shields.io/badge/AI-Ollama%20%7C%20Groq%20%7C%20OpenRouter-black" />
     <img src="https://img.shields.io/badge/Deploy-Netlify%20%2B%20Render-00C7B7?logo=netlify&logoColor=white" />
+    <img src="https://img.shields.io/badge/PWA-ready-5A0FC8?logo=pwa&logoColor=white" />
   </p>
 
   <p>
@@ -30,18 +31,38 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 
 ## Features
 
-- **Authentication** — registration and login with JWT, password hashed with bcrypt
-- **Hardened API** — rate limiting on auth endpoints (5 req/min, brute-force protection), secure HTTP headers via helmet, strict input validation
-- **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → dictionary → manual form
-- **Preview before saving** — shows parsed data with source badge (AI / Auto / Manual) and allows corrections before confirming
-- **User profile** — current balance, editable initial budget, monthly statistics
-- **Pure CSS charts** — expenses by category and last 6 months trend, no external libraries
-- **Customizable dictionary** — add your own keywords with category and type; they are checked first
-- **Filters** — all transactions, income only or expenses only, with tab counter
-- **Monthly summary** — month-by-month navigation with bar chart and totals
-- **CSV export** — download all transactions including account metadata for emergency recovery
-- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically with zero manual steps
-- **Mobile-first** — bottom navigation bar, 44px touch targets, no accidental zoom on iOS, safe area for notch/Dynamic Island
+### Core
+- **Authentication** — registration and login with JWT (7d access + 30d refresh), password hashed with bcrypt
+- **Hardened API** — rate limiting on auth endpoints (5 req/min), secure HTTP headers via helmet, strict input validation, Content-Security-Policy
+- **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → keyword dictionary → manual form
+- **Multi-transaction parsing** — type `"sushi 22€, taxi 8€, cinema 15€"` and all three are parsed and saved at once
+- **Saved templates** — star any input to save it as a quick-access chip for repeated transactions
+- **Preview before saving** — shows parsed data with source badge (AI / Auto / Manual) and allows inline corrections before confirming
+- **Undo delete** — deleted transactions disappear immediately but are actually removed after 4.5 s; an "Undo" toast lets you cancel
+
+### Finance
+- **Savings goals** — create goals with target amount, current savings and optional deadline; automatic month projection based on current savings rate
+- **Category budgets** — set monthly spending limits per category; color-coded progress bars (teal → amber → red)
+- **Month-over-month delta** — shows % change in spending vs. the previous month
+- **Daily rate + forecast** — calculates your daily spending rate and projects total expenses for the end of the month
+- **Top spending category** — highlights where most of your monthly budget goes
+
+### Data & Backup
+- **CSV export** — download all transactions including account metadata
+- **CSV import** — bulk import from a compatible backup file (up to 5 000 rows, transactional)
+- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically
+
+### UX & Performance
+- **PWA** — installable on any device; workbox service worker caches API responses (NetworkFirst) for offline reads
+- **Offline banner** — detects connectivity loss and shows a persistent notice
+- **Optimistic UI** — new transactions appear instantly without waiting for a server round-trip
+- **Server-side search & pagination** — debounced (300 ms) full-text search with AbortController; infinite scroll with 30-item pages
+- **Pull-to-refresh** — swipe down on mobile to silently reload
+- **Keyboard shortcut** — press `/` anywhere to focus the AI input
+- **IntersectionObserver lazy charts** — category and monthly charts animate only when scrolled into view
+- **Skeleton loaders** — placeholder cards during initial data fetch
+- **Account settings** — change password, delete account (with confirmation)
+- **Mobile-first** — bottom navigation bar, 44 px touch targets, safe area for notch/Dynamic Island, `prefers-reduced-motion` support
 
 ---
 
@@ -56,6 +77,8 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 | Local AI | Ollama — any LLM model |
 | Cloud AI | Groq · OpenRouter (OpenAI-compatible API) |
 | Styling | Plain CSS with CSS variables, DM Sans + DM Serif Display |
+| PWA | `vite-plugin-pwa` + Workbox |
+| Tests | Vitest |
 | Deploy | Frontend → Netlify · Backend → Render |
 
 No CSS framework, no UI library.
@@ -94,45 +117,60 @@ If no pattern matches, shows a pre-filled form with the detected amount. Grey "M
 ```
 walletai/
 ├── server/
-│   ├── index.js                  # Express entry point
-│   ├── db.js                     # SQLite init + schema
+│   ├── index.js                  # Express entry point + CSP headers
+│   ├── db.js                     # SQLite init + schema migrations
 │   ├── middleware/
 │   │   └── auth.js               # JWT guard
 │   ├── routes/
-│   │   ├── auth.js               # /api/auth/*
-│   │   ├── transactions.js       # /api/transactions/*
-│   │   └── user.js               # /api/user/*
+│   │   ├── auth.js               # /api/auth/* (login, register, change-password, delete account)
+│   │   ├── transactions.js       # /api/transactions/* (CRUD, parse, import, search, pagination)
+│   │   ├── user.js               # /api/user/* (budget, keywords, category-budgets)
+│   │   └── goals.js              # /api/goals/* (savings goals CRUD)
 │   └── utils/
 │       ├── parser.js             # 3-level parsing cascade
 │       ├── dateParser.js         # Italian dates → DD/MM/YYYY
+│       ├── sanitize.js           # Input sanitization helpers
+│       ├── logger.js             # Structured request logger
 │       └── backup.js             # Auto backup/restore via GitHub Gist
 ├── src/
 │   ├── main.jsx
-│   ├── App.jsx                   # Router + auth guard
+│   ├── App.jsx                   # Router + auth guard + offline banner
+│   ├── hooks/
+│   │   └── useKeyboardShortcuts.js
 │   ├── utils/
-│   │   └── api.js                # Centralized apiFetch + VITE_API_URL
+│   │   └── api.js                # Centralized apiFetch + token refresh
 │   ├── pages/
 │   │   ├── LoginPage.jsx         # Sign in / Sign up
-│   │   ├── ProfilePage.jsx       # Stats + keywords + CSV export
-│   │   └── TransactionsPage.jsx  # List + AI input + summary
+│   │   ├── ProfilePage.jsx       # Stats, goals, budgets, account settings, CSV
+│   │   └── TransactionsPage.jsx  # List + AI input + search + filters
 │   ├── components/
-│   │   ├── NavBar.jsx            # Top bar (desktop) + Bottom nav (mobile)
-│   │   ├── WalletCard.jsx        # Balance card — dark background
-│   │   ├── AIInput.jsx           # Text input → preview → confirm/edit
-│   │   ├── TransactionList.jsx   # List grouped by date
-│   │   ├── CategoryChart.jsx     # CSS bars by category
-│   │   ├── MonthlyChart.jsx      # CSS chart last 6 months
+│   │   ├── NavBar.jsx            # Top bar (desktop) + Bottom nav (mobile) + scroll blur
+│   │   ├── WalletCard.jsx        # Balance card — animated count-up, forecast, progress bar
+│   │   ├── AIInput.jsx           # Text input → multi-tx → preview → confirm/edit + templates
+│   │   ├── TransactionList.jsx   # List grouped by date with edit / recurring toggle
+│   │   ├── CategoryChart.jsx     # CSS bars by category (lazy IntersectionObserver)
+│   │   ├── MonthlyChart.jsx      # CSS chart last 6 months (lazy IntersectionObserver)
 │   │   ├── MonthlySummary.jsx    # Collapsible monthly summary
-│   │   └── KeywordManager.jsx    # Custom keyword CRUD
+│   │   ├── CategoryBudgets.jsx   # Per-category budget limits + progress bars
+│   │   ├── GoalsCard.jsx         # Savings goals with month projection
+│   │   ├── AccountSettings.jsx   # Change password + delete account
+│   │   ├── KeywordManager.jsx    # Custom keyword CRUD
+│   │   ├── OfflineBanner.jsx     # Fixed banner when navigator.onLine = false
+│   │   ├── SkeletonCard.jsx      # Placeholder cards during loading
+│   │   ├── Toast.jsx             # Global toast with optional action button (undo)
+│   │   └── ErrorBoundary.jsx     # React error boundary
 │   └── styles/
 │       ├── global.css            # CSS variables, reset, base classes
-│       └── components.css        # Component styles + responsive
+│       └── components.css        # Component styles + responsive + dark mode
 ├── public/
 │   ├── walletAI_logo.png
-│   └── _redirects                # Netlify proxy + SPA fallback rules
+│   ├── _redirects                # Netlify proxy + SPA fallback rules
+│   └── _headers                  # Netlify security headers (CSP, HSTS…)
+├── tests/
+│   └── parser.test.js            # Vitest unit tests for the parsing cascade
 ├── index.html
-├── vite.config.js                # Proxy /api → :3001 in development
-├── netlify.toml                  # Build config
+├── vite.config.js                # Dev proxy /api → :3001 + PWA manifest + Workbox
+├── vitest.config.js
 ├── .nvmrc                        # Node.js version pin (v20)
 ├── .env.example
 ├── .gitignore
@@ -165,6 +203,7 @@ CREATE TABLE transactions (
   raw_input   TEXT,          -- original text entered by the user
   source      TEXT CHECK(source IN ('ai','dictionary','manual')),
   confidence  TEXT CHECK(confidence IN ('high','medium','low')),
+  recurring   INTEGER DEFAULT 0,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -176,6 +215,24 @@ CREATE TABLE user_keywords (
   type       TEXT NOT NULL CHECK(type IN ('in','out')),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE category_budgets (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category      TEXT NOT NULL,
+  budget_amount REAL NOT NULL,
+  UNIQUE(user_id, category)
+);
+
+CREATE TABLE goals (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  target_amount  REAL NOT NULL,
+  current_amount REAL NOT NULL DEFAULT 0,
+  deadline       TEXT,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ---
@@ -183,20 +240,25 @@ CREATE TABLE user_keywords (
 ## API Reference
 
 ### Auth
-| Method | Endpoint | Body | Response |
-|--------|----------|------|----------|
-| POST | `/api/auth/register` | `{ username, email, password, full_name }` | `{ token, user }` |
-| POST | `/api/auth/login` | `{ username, password }` | `{ token, user }` |
-| GET  | `/api/auth/me` | — (Bearer token) | `{ user }` |
+| Method | Endpoint | Body | Notes |
+|--------|----------|------|-------|
+| POST | `/api/auth/register` | `{ username, email, password, full_name }` | Returns `{ token, user }` |
+| POST | `/api/auth/login` | `{ username, password }` | Returns `{ token, refreshToken, user }` |
+| POST | `/api/auth/refresh` | `{ refreshToken }` | Returns new `{ token }` |
+| GET  | `/api/auth/me` | — (Bearer token) | Returns `{ user }` |
+| POST | `/api/auth/change-password` | `{ currentPassword, newPassword }` | Min 8 chars |
+| DELETE | `/api/auth/account` | `{ password }` | Deletes all user data |
 
 ### Transactions
 | Method | Endpoint | Notes |
 |--------|----------|-------|
 | POST   | `/api/transactions/parse` | Parses text — does not save |
 | POST   | `/api/transactions` | Saves a transaction |
-| GET    | `/api/transactions` | Filters: `?type=in\|out&month=YYYY-MM` |
+| GET    | `/api/transactions` | Plain array; add `?search=&page=&limit=` for paginated `{ data, total, page, pages }` |
+| PUT    | `/api/transactions/:id` | Update a transaction |
 | DELETE | `/api/transactions/:id` | |
-| GET    | `/api/transactions/summary` | Totals by category, current month |
+| PATCH  | `/api/transactions/:id/recurring` | Toggle recurring flag |
+| POST   | `/api/transactions/import` | Bulk insert up to 5 000 rows (transactional) |
 
 ### User
 | Method | Endpoint | Notes |
@@ -205,6 +267,16 @@ CREATE TABLE user_keywords (
 | GET    | `/api/user/keywords` | List custom keywords |
 | POST   | `/api/user/keywords` | `{ keyword, category, type }` |
 | DELETE | `/api/user/keywords/:id` | |
+| GET    | `/api/user/category-budgets` | List all budget limits |
+| PUT    | `/api/user/category-budgets/:category` | `{ budget_amount }` — upsert |
+
+### Goals
+| Method | Endpoint | Notes |
+|--------|----------|-------|
+| GET    | `/api/goals` | List all savings goals |
+| POST   | `/api/goals` | `{ name, target_amount, current_amount, deadline? }` |
+| PATCH  | `/api/goals/:id` | `{ current_amount }` — update progress |
+| DELETE | `/api/goals/:id` | |
 
 ### Health
 | Method | Endpoint | Notes |
@@ -261,6 +333,12 @@ npm run dev
 - Frontend → [http://localhost:5173](http://localhost:5173)
 - Backend  → [http://localhost:3001](http://localhost:3001)
 
+### 5. Run tests
+
+```bash
+npm test
+```
+
 ---
 
 ## Deploy on Netlify + Render
@@ -297,7 +375,7 @@ Choose one of the two providers:
    - **Build command:** `npm install && npm rebuild better-sqlite3`
    - **Start command:** `node server/index.js`
    - **Environment:** Node
-   - **Health Check Path:** `/api/health` _(optional, recommended)_
+   - **Health Check Path:** `/api/health`
 4. Add these environment variables in the Render dashboard:
 
 ```
@@ -408,6 +486,8 @@ To change the model: edit `OLLAMA_MODEL` in `.env` (local) or in the Render envi
 ```
 
 Fonts: **DM Sans** (UI) + **DM Serif Display** (numbers and headings) via Google Fonts.
+
+Full dark mode support via `@media (prefers-color-scheme: dark)`.
 
 ---
 

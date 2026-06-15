@@ -26,6 +26,7 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Errore di accesso'); return; }
       localStorage.setItem('token', data.token);
+      if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
       navigate('/profile');
     } catch {
       setError('Errore di connessione al server');
@@ -57,6 +58,7 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Errore di registrazione'); return; }
       localStorage.setItem('token', data.token);
+      if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
       navigate('/profile');
     } catch {
       setError('Errore di connessione al server');

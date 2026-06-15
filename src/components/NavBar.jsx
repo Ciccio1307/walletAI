@@ -1,11 +1,20 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 
 export default function NavBar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    function onScroll() { setScrolled(window.scrollY > 12); }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   function logout() {
     localStorage.removeItem('token');
+    localStorage.removeItem('refresh_token');
     navigate('/login');
   }
 
@@ -15,7 +24,7 @@ export default function NavBar() {
   return (
     <>
       {/* ── Top bar ── */}
-      <nav className="navbar">
+      <nav className={`navbar${scrolled ? ' scrolled' : ''}`}>
         <div className="navbar-inner">
           <div className="navbar-logo">
             <img src="/walletAI_logo.png" alt="WalletAI" />
