@@ -7,25 +7,35 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['walletAI_logo.png'],
+      includeAssets: [
+        'walletAI_logo.png',
+        'icon-192.png',
+        'icon-512.png',
+        'icon-maskable-512.png',
+        'apple-touch-icon.png',
+      ],
       manifest: {
         name: 'WalletAI',
         short_name: 'WalletAI',
         description: 'Gestisci le tue finanze con l\'AI',
-        theme_color: '#1D9E75',
+        lang: 'it',
+        theme_color: '#F5F2EE',
         background_color: '#F5F2EE',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
         scope: '/',
         icons: [
-          { src: 'walletAI_logo.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: 'walletAI_logo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
@@ -37,16 +47,19 @@ export default defineConfig({
             },
           },
           {
+            // Offline reads for the transaction list. The cache is cleared on
+            // login/logout so it cannot leak data between accounts.
             urlPattern: ({ url }) => url.pathname.startsWith('/api/transactions'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-transactions',
               networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 },
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
               cacheableResponse: { statuses: [200] },
             },
           },
           {
+            // Cached profile for offline reads; cleared on login/logout.
             urlPattern: ({ url }) => url.pathname === '/api/auth/me',
             handler: 'NetworkFirst',
             options: {

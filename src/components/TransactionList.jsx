@@ -7,8 +7,10 @@ const SWIPE_THRESHOLD = -75;
 
 function formatDateLabel(dateStr) {
   if (!dateStr) return '';
-  const [d, m, y] = dateStr.split('/');
-  const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+  const [d, m, y] = String(dateStr).split('/');
+  if (!d || !m || !y) return dateStr;
+  const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+  if (Number.isNaN(date.getTime())) return dateStr;
   const today = new Date(); today.setHours(0,0,0,0);
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
   if (date.getTime() === today.getTime()) return 'Oggi';
@@ -30,8 +32,8 @@ export default function TransactionList({ transactions, onDelete, onEdit, onTogg
   }
 
   async function saveEdit(id) {
-    await onEdit?.(id, { ...editForm, amount: parseFloat(editForm.amount) });
-    setEditingId(null);
+    const ok = await onEdit?.(id, { ...editForm, amount: parseFloat(editForm.amount) });
+    if (ok !== false) setEditingId(null);
   }
 
   // ── Swipe to delete ──
@@ -70,11 +72,16 @@ export default function TransactionList({ transactions, onDelete, onEdit, onTogg
 
   const groups = {};
   for (const tx of transactions) {
-    if (!groups[tx.date]) groups[tx.date] = [];
-    groups[tx.date].push(tx);
+    const key = tx.date || 'senza-data';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(tx);
   }
   const sortedDates = Object.keys(groups).sort((a, b) => {
-    const parse = s => { const [d, m, y] = s.split('/'); return new Date(y, m-1, d); };
+    const parse = s => {
+      const [d, m, y] = String(s).split('/');
+      const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+      return Number.isNaN(date.getTime()) ? 0 : date;
+    };
     return parse(b) - parse(a);
   });
 
@@ -143,9 +150,10 @@ export default function TransactionList({ transactions, onDelete, onEdit, onTogg
                       className={`tx-recurring-btn ${tx.recurring ? 'active' : ''}`}
                       onClick={() => onToggleRecurring?.(tx.id)}
                       title={tx.recurring ? 'Rimuovi dai ricorrenti' : 'Segna come ricorrente'}
+                      aria-label={tx.recurring ? 'Rimuovi dai ricorrenti' : 'Segna come ricorrente'}
                     >🔁</button>
-                    <button className="tx-edit-btn" onClick={() => startEdit(tx)} title="Modifica">✏️</button>
-                    <button className="tx-delete" onClick={() => onDelete(tx.id)} title="Elimina">×</button>
+                    <button className="tx-edit-btn" onClick={() => startEdit(tx)} title="Modifica" aria-label="Modifica transazione">✏️</button>
+                    <button className="tx-delete" onClick={() => onDelete(tx.id)} title="Elimina" aria-label="Elimina transazione">×</button>
                   </div>
                 </div>
               </div>

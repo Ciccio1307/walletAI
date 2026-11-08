@@ -6,7 +6,7 @@ const CATEGORY_EMOJI = {
   entrata: '💰', altro: '📦',
 };
 
-export default function CategoryChart({ transactions }) {
+export default function CategoryChart({ categories = {} }) {
   const containerRef = useRef(null);
   const [mounted, setMounted] = useState(false);
 
@@ -20,13 +20,10 @@ export default function CategoryChart({ transactions }) {
     return () => obs.disconnect();
   }, []);
 
-  const outTx = transactions.filter(t => t.type === 'out');
-  const byCategory = {};
-  for (const tx of outTx) {
-    byCategory[tx.category] = (byCategory[tx.category] || 0) + tx.amount;
-  }
+  const sorted = Object.entries(categories)
+    .filter(([, amount]) => Number(amount) > 0)
+    .sort((a, b) => b[1] - a[1]);
 
-  const sorted = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
   const max = sorted[0]?.[1] || 1;
   const fmt = (n) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 

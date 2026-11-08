@@ -1,48 +1,135 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { parseTransaction } from '../utils/parser.js';
 import { saveBackup } from '../utils/backup.js';
 import { sanitize } from '../utils/sanitize.js';
+import {
+  ddmmyyyyToDate,
+  isValidAmount,
+  monthPattern,
+  normalizeCategory,
+  normalizeConfidence,
+  normalizeDate,
+  normalizeMonth,
+  normalizeSource,
+} from '../utils/validate.js';
 
 const router = Router();
 router.use(requireAuth);
 
-router.post('/parse', async (req, res) => {
-  const { raw_text } = req.body;
-  if (!raw_text?.trim()) {
-    return res.status(400).json({ error: 'Testo mancante' });
-  }
-
-  const userKeywords = db.prepare('SELECT * FROM user_keywords WHERE user_id = ?').all(req.userId);
-  const result = await parseTransaction(raw_text.trim(), userKeywords);
-  res.json(result);
+const parseLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  keyGenerator: (req) => String(req.userId),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Troppe analisi, riprova tra un minuto' },
 });
 
-router.post('/', (req, res) => {
-  const { amount, type, description, category, date, raw_input, source, confidence } = req.body;
-  if (!amount || !type || !date) {
-    return res.status(400).json({ error: 'Campi obbligatori: amount, type, date' });
+const pad = (n) => String(n).padStart(2, '0');
+
+function parseAmount(value) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && value.trim() !== '') return Number(value);
+  return NaN;
+}
+
+function validateTransactionInput(input) {
+  // Import rows can be anything (null, strings…): treat them as empty objects.
+  const body = input && typeof input === 'object' ? input : {};
+  const amount = parseAmount(body.amount);
+  if (!isValidAmount(amount)) {
+    return { error: 'amount deve essere un numero maggiore di 0' };
   }
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-    return res.status(400).json({ error: 'amount deve essere un numero maggiore di 0' });
-  }
+
+  const type = body.type;
   if (type !== 'in' && type !== 'out') {
-    return res.status(400).json({ error: "type deve essere 'in' o 'out'" });
+    return { error: "type deve essere 'in' o 'out'" };
   }
+
+  const date = normalizeDate(body.date);
+  if (!date) {
+    return { error: 'date non valida (formato richiesto: GG/MM/AAAA)' };
+  }
+
+  return {
+    value: {
+      amount,
+      type,
+      date,
+      description: sanitize(String(body.description ?? ''), 100) || '',
+      category: normalizeCategory(body.category),
+      raw_input: sanitize(String(body.raw_input ?? ''), 500) || '',
+      source: normalizeSource(body.source),
+      confidence: normalizeConfidence(body.confidence),
+    },
+  };
+}
+
+function buildWhere(req) {
+  let where = 'WHERE user_id = ?';
+  const params = [req.userId];
+
+  const { type, recurring, search } = req.query;
+
+  if (type === 'in' || type === 'out') {
+    where += ' AND type = ?';
+    params.push(type);
+  }
+
+  if (recurring === '1' || recurring === 'true') {
+    where += ' AND recurring = 1';
+  }
+
+  if (req.query.month) {
+    const month = normalizeMonth(req.query.month);
+    if (!month) return { error: 'month non valido (formato: YYYY-MM)' };
+    const [year, monthNumber] = month.split('-').map(Number);
+    where += ' AND date LIKE ?';
+    params.push(monthPattern(year, monthNumber));
+  }
+
+  const query = typeof search === 'string' ? search.trim() : '';
+  if (query) {
+    const escaped = query.replace(/[\\%_]/g, '\\$&');
+    where += " AND (description LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\')";
+    params.push(`%${escaped}%`, `%${escaped}%`);
+  }
+
+  return { where, params };
+}
+
+router.post('/parse', parseLimiter, asyncHandler(async (req, res) => {
+  const rawText = typeof req.body.raw_text === 'string' ? req.body.raw_text.trim() : '';
+  if (!rawText) {
+    return res.status(400).json({ error: 'Testo mancante' });
+  }
+  if (rawText.length > 500) {
+    return res.status(400).json({ error: 'Testo troppo lungo (massimo 500 caratteri)' });
+  }
+
+  // The client can send its own date, so "oggi" and "ieri" are correct even
+  // when the server runs in a different timezone (e.g. Render = UTC).
+  const today = ddmmyyyyToDate(req.body.today) || new Date();
+
+  const userKeywords = db.prepare('SELECT * FROM user_keywords WHERE user_id = ?').all(req.userId);
+  const result = await parseTransaction(rawText, userKeywords, today);
+  res.json(result);
+}));
+
+router.post('/', (req, res) => {
+  const parsed = validateTransactionInput(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+  const { amount, type, description, category, date, raw_input, source, confidence } = parsed.value;
 
   const result = db.prepare(
     `INSERT INTO transactions (user_id, amount, type, description, category, date, raw_input, source, confidence)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    req.userId, amount, type,
-    sanitize(description, 100) || '',
-    sanitize(category, 50)     || 'altro',
-    date,
-    sanitize(raw_input, 500)   || '',
-    source || 'manual',
-    confidence || 'low'
-  );
+  ).run(req.userId, amount, type, description, category, date, raw_input, source, confidence);
 
   const tx = db.prepare('SELECT * FROM transactions WHERE id = ?').get(result.lastInsertRowid);
   saveBackup();
@@ -50,32 +137,33 @@ router.post('/', (req, res) => {
 });
 
 router.get('/', (req, res) => {
-  const { type, month, search, page, limit: limitParam } = req.query;
-  const limitNum = Math.min(200, parseInt(limitParam) || 0);
-  const pageNum  = Math.max(1, parseInt(page) || 1);
+  const built = buildWhere(req);
+  if (built.error) return res.status(400).json({ error: built.error });
 
-  let where = 'WHERE user_id = ?';
-  const params = [req.userId];
+  const { where, params } = built;
+  const base = `SELECT * FROM transactions ${where} ORDER BY created_at DESC, id DESC`;
 
-  if (type === 'in' || type === 'out') { where += ' AND type = ?'; params.push(type); }
-  if (month) {
-    const [year, mon] = month.split('-');
-    where += ' AND date LIKE ?';
-    params.push(`%/${mon}/${year}`);
+  let limitNum = 0;
+  if (req.query.limit !== undefined) {
+    const parsed = Number.parseInt(req.query.limit, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return res.status(400).json({ error: 'limit non valido' });
+    }
+    limitNum = Math.min(parsed, 200);
   }
-  if (search?.trim()) {
-    where += ' AND (description LIKE ? OR category LIKE ?)';
-    const q = `%${search.trim()}%`;
-    params.push(q, q);
-  }
-
-  const base = `SELECT * FROM transactions ${where} ORDER BY created_at DESC`;
 
   if (limitNum > 0) {
-    const total  = db.prepare(`SELECT COUNT(*) as n FROM transactions ${where}`).get(...params).n;
+    const pageNum = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const total = db.prepare(`SELECT COUNT(*) as n FROM transactions ${where}`).get(...params).n;
     const offset = (pageNum - 1) * limitNum;
-    const data   = db.prepare(`${base} LIMIT ? OFFSET ?`).all(...params, limitNum, offset);
-    return res.json({ data, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum) });
+    const data = db.prepare(`${base} LIMIT ? OFFSET ?`).all(...params, limitNum, offset);
+    return res.json({
+      data,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      pages: Math.ceil(total / limitNum),
+    });
   }
 
   res.json(db.prepare(base).all(...params));
@@ -96,51 +184,42 @@ router.post('/import', (req, res) => {
   );
 
   const importMany = db.transaction((list) => {
-    let count = 0;
+    let imported = 0;
+    let skipped = 0;
+
     for (const row of list) {
-      const amt = parseFloat(row.amount);
-      if (!amt || !Number.isFinite(amt) || amt <= 0) continue;
-      if (row.type !== 'in' && row.type !== 'out') continue;
-      if (!row.date) continue;
-      stmt.run(
-        req.userId, amt, row.type,
-        sanitize(row.description, 100) || '',
-        sanitize(row.category, 50)     || 'altro',
-        row.date,
-        sanitize(row.raw_input, 500)   || '',
-        row.source    || 'manual',
-        row.confidence || 'low'
-      );
-      count++;
+      const parsed = validateTransactionInput(row);
+      if (parsed.error) {
+        skipped++;
+        continue;
+      }
+      const { amount, type, description, category, date, raw_input, source, confidence } = parsed.value;
+      stmt.run(req.userId, amount, type, description, category, date, raw_input, source, confidence);
+      imported++;
     }
-    return count;
+
+    return { imported, skipped };
   });
 
-  const imported = importMany(rows);
+  const result = importMany(rows);
   saveBackup();
-  res.json({ imported });
+  res.json(result);
 });
 
 router.put('/:id', (req, res) => {
   const tx = db.prepare('SELECT id FROM transactions WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
   if (!tx) return res.status(404).json({ error: 'Transazione non trovata' });
 
-  const { amount, type, description, category, date } = req.body;
-  if (!amount || !type || !date) {
-    return res.status(400).json({ error: 'Campi obbligatori: amount, type, date' });
-  }
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-    return res.status(400).json({ error: 'amount deve essere un numero maggiore di 0' });
-  }
-  if (type !== 'in' && type !== 'out') {
-    return res.status(400).json({ error: "type deve essere 'in' o 'out'" });
-  }
+  const parsed = validateTransactionInput(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+  const { amount, type, description, category, date } = parsed.value;
 
   db.prepare(
-    'UPDATE transactions SET amount=?, type=?, description=?, category=?, date=? WHERE id=?'
-  ).run(amount, type, sanitize(description, 100) || '', sanitize(category, 50) || 'altro', date, req.params.id);
+    'UPDATE transactions SET amount=?, type=?, description=?, category=?, date=? WHERE id=? AND user_id=?'
+  ).run(amount, type, description, category, date, req.params.id, req.userId);
 
-  const updated = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
+  const updated = db.prepare('SELECT * FROM transactions WHERE id=? AND user_id=?').get(req.params.id, req.userId);
   saveBackup();
   res.json(updated);
 });
@@ -150,7 +229,9 @@ router.patch('/:id/recurring', (req, res) => {
   if (!tx) return res.status(404).json({ error: 'Transazione non trovata' });
 
   const newVal = tx.recurring ? 0 : 1;
-  db.prepare('UPDATE transactions SET recurring = ? WHERE id = ?').run(newVal, req.params.id);
+  db.prepare('UPDATE transactions SET recurring = ? WHERE id = ? AND user_id = ?')
+    .run(newVal, req.params.id, req.userId);
+  saveBackup();
   res.json({ id: tx.id, recurring: newVal });
 });
 
@@ -158,25 +239,120 @@ router.delete('/:id', (req, res) => {
   const tx = db.prepare('SELECT id FROM transactions WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
   if (!tx) return res.status(404).json({ error: 'Transazione non trovata' });
 
-  db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   saveBackup();
   res.json({ ok: true });
 });
 
-router.get('/summary', (req, res) => {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const year = now.getFullYear();
-  const pattern = `%/${month}/${year}`;
+function totalsFor(userId, year, monthNumber) {
+  const pattern = monthPattern(year, monthNumber);
 
-  const rows = db.prepare(
-    `SELECT category, type, SUM(amount) as total
+  const totals = db.prepare(
+    `SELECT type, SUM(amount) AS total
      FROM transactions
      WHERE user_id = ? AND date LIKE ?
-     GROUP BY category, type`
-  ).all(req.userId, pattern);
+     GROUP BY type`
+  ).all(userId, pattern);
 
-  res.json(rows);
+  const categories = db.prepare(
+    `SELECT category, SUM(amount) AS total
+     FROM transactions
+     WHERE user_id = ? AND date LIKE ? AND type = 'out'
+     GROUP BY category`
+  ).all(userId, pattern);
+
+  const result = { in: 0, out: 0, categories: {} };
+  for (const row of totals) result[row.type] = Number(row.total) || 0;
+  for (const row of categories) {
+    const category = normalizeCategory(row.category);
+    result.categories[category] = (result.categories[category] || 0) + (Number(row.total) || 0);
+  }
+  return result;
+}
+
+router.get('/summary', (req, res) => {
+  let monthKeyValue;
+
+  if (req.query.month) {
+    monthKeyValue = normalizeMonth(req.query.month);
+    if (!monthKeyValue) {
+      return res.status(400).json({ error: 'month non valido (formato: YYYY-MM)' });
+    }
+  } else {
+    const today = ddmmyyyyToDate(req.query.today) || new Date();
+    monthKeyValue = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+  }
+
+  const [year, monthNumber] = monthKeyValue.split('-').map(Number);
+  const totals = totalsFor(req.userId, year, monthNumber);
+
+  res.json({
+    month: monthKeyValue,
+    year,
+    monthNumber,
+    in: totals.in,
+    out: totals.out,
+    net: totals.in - totals.out,
+    categories: totals.categories,
+  });
+});
+
+router.get('/stats', (req, res) => {
+  const today = ddmmyyyyToDate(req.query.today) || new Date();
+  const year = today.getFullYear();
+  const monthNumber = today.getMonth() + 1;
+
+  const current = totalsFor(req.userId, year, monthNumber);
+  const lastDate = new Date(year, monthNumber - 2, 1);
+  const last = totalsFor(req.userId, lastDate.getFullYear(), lastDate.getMonth() + 1);
+
+  const months = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(year, monthNumber - 1 - (5 - index), 1);
+    const totals = totalsFor(req.userId, date.getFullYear(), date.getMonth() + 1);
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      in: totals.in,
+      out: totals.out,
+    };
+  });
+
+  const typeCounts = db.prepare(
+    'SELECT type, COUNT(*) AS n FROM transactions WHERE user_id = ? GROUP BY type'
+  ).all(req.userId);
+
+  const typeTotals = db.prepare(
+    'SELECT type, SUM(amount) AS total FROM transactions WHERE user_id = ? GROUP BY type'
+  ).all(req.userId);
+
+  const counts = { all: 0, in: 0, out: 0 };
+  for (const row of typeCounts) counts[row.type] = Number(row.n) || 0;
+  counts.all = counts.in + counts.out;
+  counts.recurring = db.prepare(
+    'SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND recurring = 1'
+  ).get(req.userId).n;
+
+  const totals = { in: 0, out: 0 };
+  for (const row of typeTotals) totals[row.type] = Number(row.total) || 0;
+
+  res.json({
+    counts,
+    totals,
+    currentMonth: {
+      year,
+      month: monthNumber,
+      in: current.in,
+      out: current.out,
+      categories: current.categories,
+    },
+    lastMonth: {
+      year: lastDate.getFullYear(),
+      month: lastDate.getMonth() + 1,
+      in: last.in,
+      out: last.out,
+    },
+    months,
+  });
 });
 
 export default router;

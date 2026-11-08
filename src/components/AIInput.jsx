@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { apiFetch } from '../utils/api.js';
+import { apiFetch, clearSession } from '../utils/api.js';
 import { useToast } from './Toast.jsx';
 
 const CATEGORIES  = ['cibo','trasporti','salute','svago','regali','casa','shopping','lavoro','entrata','altro'];
 const EMOJI       = { cibo:'🍽️',trasporti:'🚗',salute:'💊',svago:'🎮',regali:'🎁',casa:'🏠',shopping:'🛍️',lavoro:'💼',entrata:'💰',altro:'📦' };
 const SOURCE_LABEL = { ai:'AI', dictionary:'Auto', manual:'Manuale' };
+const fmtAmount = (n) => new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parseFloat(n) || 0);
 
 function today() {
   const d = new Date(); const p = n => String(n).padStart(2, '0');
@@ -16,8 +17,10 @@ function detectMultiple(t) {
   return amounts && amounts.length >= 2;
 }
 
+// Splits on ";" and on commas that are not decimal separators:
+// "pizza 12,50€, taxi 8€" -> ["pizza 12,50€", "taxi 8€"].
 function splitText(t) {
-  return t.split(/[,;]+/).map(s => s.trim()).filter(s => s.length > 1 && /\d/.test(s));
+  return t.split(/;|(?<!\d),|,(?!\d)/).map(s => s.trim()).filter(s => s.length > 1 && /\d/.test(s));
 }
 
 export default function AIInput({ onTransactionSaved }) {
@@ -51,7 +54,7 @@ export default function AIInput({ onTransactionSaved }) {
       try {
         const results = await Promise.all(
           parts.map(p =>
-            apiFetch('/api/transactions/parse', { method:'POST', body: JSON.stringify({ raw_text: p }) })
+            apiFetch('/api/transactions/parse', { method:'POST', body: JSON.stringify({ raw_text: p, today: today() }) })
               .then(r => r.json()).then(d => ({ ...d, rawText: p }))
           )
         );
@@ -66,8 +69,13 @@ export default function AIInput({ onTransactionSaved }) {
 
     setStatus('Analizzando…');
     try {
-      const res  = await apiFetch('/api/transactions/parse', { method:'POST', body: JSON.stringify({ raw_text: text }) });
-      if (res.status === 401) { localStorage.removeItem('token'); window.location.href = '/login'; return; }
+      const res  = await apiFetch('/api/transactions/parse', { method:'POST', body: JSON.stringify({ raw_text: text, today: today() }) });
+      if (res.status === 401) { clearSession(); window.location.href = '/login'; return; }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.error || 'Errore durante l\'analisi', 'error');
+        return;
+      }
       const data = await res.json();
       if (data.source === 'dictionary') setStatus('Usando dizionario locale…');
       if (data.needsManualInput) {
@@ -87,60 +95,113 @@ export default function AIInput({ onTransactionSaved }) {
   }
 
   async function confirmSave() {
-    setSaving(true);
-    const payload = showEdit ? editData : { amount: parsed.amount, type: parsed.type, description: parsed.description, category: parsed.category, date: parsed.date };
-    const res = await apiFetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify({ ...payload, raw_input: text, source: parsed.source, confidence: parsed.confidence }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      const newTx = await res.json();
-      setSuccess(true);
-      showToast('Transazione salvata');
-      onTransactionSaved?.(newTx);
-      setTimeout(() => { setSuccess(false); setText(''); setParsed(null); setShowEdit(false); }, 950);
+    const base = showEdit ? editData : parsed;
+    const amount = parseFloat(base.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Importo non valido', 'error');
+      return;
     }
+
+    setSaving(true);
+    const payload = {
+      amount,
+      type: base.type,
+      description: base.description,
+      category: base.category,
+      date: base.date,
+    };
+    let res;
+    try {
+      res = await apiFetch('/api/transactions', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, raw_input: text, source: parsed.source, confidence: parsed.confidence }),
+      });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    } finally {
+      setSaving(false);
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore di salvataggio', 'error');
+      return;
+    }
+
+    const newTx = await res.json();
+    setSuccess(true);
+    showToast('Transazione salvata');
+    onTransactionSaved?.(newTx);
+    setTimeout(() => { setSuccess(false); setText(''); setParsed(null); setShowEdit(false); }, 950);
   }
 
   async function saveMultiple() {
     setSaving(true);
     let count = 0;
+    let failed = 0;
+
     for (const p of multipleParsed) {
-      const res = await apiFetch('/api/transactions', {
-        method: 'POST',
-        body: JSON.stringify({
-          amount: p.amount, type: p.type, description: p.description,
-          category: p.category, date: p.date,
-          raw_input: p.rawText || text, source: p.source, confidence: p.confidence,
-        }),
-      });
-      if (res.ok) { const tx = await res.json(); onTransactionSaved?.(tx); count++; }
+      try {
+        const res = await apiFetch('/api/transactions', {
+          method: 'POST',
+          body: JSON.stringify({
+            amount: parseFloat(p.amount), type: p.type, description: p.description,
+            category: p.category, date: p.date,
+            raw_input: p.rawText || text, source: p.source, confidence: p.confidence,
+          }),
+        });
+        if (res.ok) { await res.json(); count++; }
+        else failed++;
+      } catch {
+        failed++;
+      }
     }
+
     setSaving(false);
-    setSuccess(true);
-    showToast(`${count} transazioni salvate`);
+    setSuccess(count > 0);
+    if (count > 0) onTransactionSaved?.();
+    showToast(failed ? `${count} salvate, ${failed} errori` : `${count} transazioni salvate`, failed ? 'error' : 'success');
     setTimeout(() => { setSuccess(false); setText(''); setMultipleParsed(null); }, 950);
   }
 
   async function saveManual(e) {
     e.preventDefault();
-    setSaving(true);
-    const res = await apiFetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify({ ...manualForm, amount: parseFloat(manualForm.amount), raw_input: text, source:'manual', confidence:'low' }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      const newTx = await res.json();
-      setSuccess(true);
-      showToast('Transazione salvata');
-      onTransactionSaved?.(newTx);
-      setTimeout(() => {
-        setSuccess(false); setText(''); setManual(false);
-        setManualForm({ amount:'', description:'', category:'altro', type:'out', date: today() });
-      }, 950);
+    const amount = parseFloat(manualForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Importo non valido', 'error');
+      return;
     }
+
+    setSaving(true);
+    let res;
+    try {
+      res = await apiFetch('/api/transactions', {
+        method: 'POST',
+        body: JSON.stringify({ ...manualForm, amount, raw_input: text, source:'manual', confidence:'low' }),
+      });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    } finally {
+      setSaving(false);
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore di salvataggio', 'error');
+      return;
+    }
+
+    const newTx = await res.json();
+    setSuccess(true);
+    showToast('Transazione salvata');
+    onTransactionSaved?.(newTx);
+    setTimeout(() => {
+      setSuccess(false); setText(''); setManual(false);
+      setManualForm({ amount:'', description:'', category:'altro', type:'out', date: today() });
+    }, 950);
   }
 
   function cancel() { setParsed(null); setMultipleParsed(null); setManual(false); setShowEdit(false); setSuccess(false); }
@@ -182,7 +243,7 @@ export default function AIInput({ onTransactionSaved }) {
           {templates.map((t, i) => (
             <div key={i} className="template-chip">
               <button className="template-chip-text" onClick={() => setText(t)}>{t}</button>
-              <button className="template-chip-del" onClick={() => removeTemplate(t)}>✕</button>
+              <button className="template-chip-del" onClick={() => removeTemplate(t)} aria-label="Rimuovi template">✕</button>
             </div>
           ))}
         </div>
@@ -217,7 +278,7 @@ export default function AIInput({ onTransactionSaved }) {
               <span className="multi-emoji">{EMOJI[p.category] || '📦'}</span>
               <span className="multi-desc">{p.description}</span>
               <span className={`multi-amount ${p.type}`}>
-                {p.type === 'out' ? '-' : '+'}{parseFloat(p.amount).toFixed(2)} €
+                {p.type === 'out' ? '-' : '+'}{fmtAmount(p.amount)} €
               </span>
             </div>
           ))}
@@ -238,7 +299,7 @@ export default function AIInput({ onTransactionSaved }) {
             <span className="preview-desc">{showEdit ? editData.description : parsed.description}</span>
             <span className={`preview-amount ${showEdit ? editData.type : parsed.type}`}>
               {(showEdit ? editData.type : parsed.type) === 'out' ? '-' : '+'}
-              {parseFloat(showEdit ? editData.amount : parsed.amount).toFixed(2)} €
+              {fmtAmount(showEdit ? editData.amount : parsed.amount)} €
             </span>
           </div>
           <div className="preview-meta">

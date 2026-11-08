@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../utils/api.js';
+import { useToast } from './Toast.jsx';
 
 export default function GoalsCard({ monthlySavings = 0 }) {
+  const showToast = useToast();
   const [goals, setGoals]           = useState([]);
   const [showAdd, setShowAdd]       = useState(false);
   const [saving, setSaving]         = useState(false);
@@ -35,22 +37,33 @@ export default function GoalsCard({ monthlySavings = 0 }) {
       setShowAdd(false);
       setForm({ name: '', target_amount: '', current_amount: '', deadline: '' });
       load();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore durante il salvataggio', 'error');
     }
   }
 
   async function saveUpdate(id) {
     const val = parseFloat(editVal);
-    if (isNaN(val) || val < 0) return;
+    if (isNaN(val) || val < 0) {
+      showToast('Importo non valido', 'error');
+      return;
+    }
     const res = await apiFetch(`/api/goals/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ current_amount: val }),
     });
     if (res.ok) { setEditingId(null); load(); }
+    else {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore durante l\'aggiornamento', 'error');
+    }
   }
 
   async function deleteGoal(id) {
-    await apiFetch(`/api/goals/${id}`, { method: 'DELETE' });
-    setGoals(prev => prev.filter(g => g.id !== id));
+    const res = await apiFetch(`/api/goals/${id}`, { method: 'DELETE' });
+    if (res.ok) setGoals((prev) => prev.filter((goal) => goal.id !== id));
+    else showToast('Errore durante l\'eliminazione', 'error');
   }
 
   return (
@@ -112,7 +125,7 @@ export default function GoalsCard({ monthlySavings = 0 }) {
                 )}
                 {g.deadline && (
                   <span className="goal-deadline">
-                    entro {new Date(g.deadline).toLocaleDateString('it-IT')}
+                    entro {new Date(`${g.deadline}T00:00:00`).toLocaleDateString('it-IT')}
                   </span>
                 )}
               </div>
@@ -144,7 +157,7 @@ export default function GoalsCard({ monthlySavings = 0 }) {
                   ✏️ Aggiorna
                 </button>
               )}
-              <button className="goal-delete-btn" onClick={() => deleteGoal(g.id)}>🗑</button>
+              <button className="goal-delete-btn" onClick={() => deleteGoal(g.id)} aria-label="Elimina obiettivo">🗑</button>
             </div>
           </div>
         );

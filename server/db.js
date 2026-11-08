@@ -8,6 +8,8 @@ const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -37,6 +39,7 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_date     ON transactions(date);
+  CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
 
   CREATE TABLE IF NOT EXISTS user_keywords (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,10 +52,13 @@ db.exec(`
   );
 `);
 
-// Safe migrations for columns added after initial schema creation
-try { db.exec('ALTER TABLE transactions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0'); } catch {}
+// Safe migrations for columns added after the initial schema.
+try { db.exec('ALTER TABLE transactions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'); } catch { /* already present */ }
 
 db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_keywords_user_id ON user_keywords(user_id);
+
   CREATE TABLE IF NOT EXISTS category_budgets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -71,6 +77,8 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+  CREATE INDEX IF NOT EXISTS idx_goals_user_id ON goals(user_id);
+  CREATE INDEX IF NOT EXISTS idx_budgets_user_id ON category_budgets(user_id);
 `);
 
 export default db;

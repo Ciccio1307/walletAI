@@ -17,6 +17,18 @@ describe('extractAmount', () => {
   it('riconosce numero senza simbolo', () => {
     expect(extractAmount('spesa 30 euro')).toBe(30);
   });
+  it('riconosce le migliaia con il punto', () => {
+    expect(extractAmount('stipendio 1.200€')).toBe(1200);
+    expect(extractAmount('1.234,56€')).toBe(1234.56);
+    expect(extractAmount('ho speso 1.234,56 euro')).toBe(1234.56);
+  });
+  it('non interpreta una data come importo', () => {
+    expect(extractAmount('spesa 12/03')).toBeNull();
+  });
+  it('preferisce il numero con simbolo €', () => {
+    expect(extractAmount('iPhone 15 899€')).toBe(899);
+    expect(extractAmount('2 biglietti 20€')).toBe(20);
+  });
 });
 
 describe('tryDictionary', () => {
@@ -51,6 +63,14 @@ describe('tryDictionary', () => {
     const r = tryDictionary('pilates 30€', userKws);
     expect(r?.category).toBe('salute');
     expect(r?.source).toBe('dictionary');
+  });
+  it('usa la data del client per "ieri l\'altro"', () => {
+    const today = new Date(2026, 10, 3);
+    const r = tryDictionary("pizza 10€ ieri l'altro", [], today);
+    expect(r?.date).toBe('01/11/2026');
+  });
+  it('non trasforma una data in importo', () => {
+    expect(tryDictionary('spesa 12/03')).toBeNull();
   });
 });
 

@@ -1,57 +1,68 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../utils/api.js';
+import { useToast } from './Toast.jsx';
 
-const CATEGORIES = ['cibo','trasporti','salute','svago','regali','casa','shopping','lavoro','altro'];
-const EMOJI = { cibo:'🍽️',trasporti:'🚗',salute:'💊',svago:'🎮',regali:'🎁',casa:'🏠',shopping:'🛍️',lavoro:'💼',altro:'📦' };
+const CATEGORIES = ['cibo', 'trasporti', 'salute', 'svago', 'regali', 'casa', 'shopping', 'lavoro', 'altro'];
+const EMOJI = { cibo: '🍽️', trasporti: '🚗', salute: '💊', svago: '🎮', regali: '🎁', casa: '🏠', shopping: '🛍️', lavoro: '💼', altro: '📦' };
 
-export default function CategoryBudgets({ monthTx }) {
+export default function CategoryBudgets({ spending = {} }) {
+  const showToast = useToast();
   const [budgets, setBudgets] = useState({});
   const [editing, setEditing] = useState(null);
   const [editVal, setEditVal] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const res = await apiFetch('/api/user/category-budgets');
-    if (res.ok) {
-      const rows = await res.json();
-      const map = {};
-      rows.forEach(r => { map[r.category] = r.budget_amount; });
-      setBudgets(map);
+    try {
+      const res = await apiFetch('/api/user/category-budgets');
+      if (res.ok) {
+        const rows = await res.json();
+        const map = {};
+        rows.forEach((row) => { map[row.category] = row.budget_amount; });
+        setBudgets(map);
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   async function saveBudget(category) {
-    const val = parseFloat(editVal);
-    await apiFetch(`/api/user/category-budgets/${category}`, {
+    const value = parseFloat(editVal);
+    const res = await apiFetch(`/api/user/category-budgets/${category}`, {
       method: 'PUT',
-      body: JSON.stringify({ budget_amount: isNaN(val) ? 0 : val }),
+      body: JSON.stringify({ budget_amount: Number.isFinite(value) ? value : 0 }),
     });
-    setEditing(null);
-    load();
+
+    if (res.ok) {
+      setEditing(null);
+      load();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore durante il salvataggio', 'error');
+    }
   }
 
-  const fmt = n => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
+  const fmt = (n) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
-  const spending = CATEGORIES.reduce((acc, cat) => {
-    acc[cat] = monthTx.filter(t => t.type === 'out' && t.category === cat).reduce((s, t) => s + t.amount, 0);
-    return acc;
-  }, {});
+  if (loading) return null;
 
-  const activeCats = CATEGORIES.filter(cat => spending[cat] > 0 || budgets[cat]);
-
-  if (loading || activeCats.length === 0) return null;
+  // Show every category so a budget can be created before the first expense.
+  const ordered = [...CATEGORIES].sort((a, b) => {
+    const scoreA = (spending[a] || 0) + (budgets[a] ? 1 : 0);
+    const scoreB = (spending[b] || 0) + (budgets[b] ? 1 : 0);
+    return scoreB - scoreA;
+  });
 
   return (
     <div className="category-budgets card">
       <h3 className="section-title">Budget per categoria</h3>
-      {activeCats.map(cat => {
-        const spent  = spending[cat] || 0;
+      {ordered.map((cat) => {
+        const spent = spending[cat] || 0;
         const budget = budgets[cat];
-        const pct    = budget ? Math.min((spent / budget) * 100, 100) : null;
-        const over   = budget && spent > budget;
+        const pct = budget ? Math.min((spent / budget) * 100, 100) : null;
+        const over = budget && spent > budget;
         return (
           <div key={cat} className="cb-row">
             <div className="cb-header">
@@ -63,7 +74,7 @@ export default function CategoryBudgets({ monthTx }) {
                     type="number" step="0.01" inputMode="decimal"
                     className="input cb-input"
                     value={editVal}
-                    onChange={e => setEditVal(e.target.value)}
+                    onChange={(e) => setEditVal(e.target.value)}
                     placeholder="Limite €"
                     autoFocus
                   />

@@ -6,131 +6,208 @@ import AIInput from '../components/AIInput.jsx';
 import TransactionList from '../components/TransactionList.jsx';
 import MonthlySummary from '../components/MonthlySummary.jsx';
 import SkeletonCard from '../components/SkeletonCard.jsx';
-import { apiFetch } from '../utils/api.js';
+import { apiFetch, getToken } from '../utils/api.js';
+import { applyStatsDelta } from '../utils/stats.js';
 import { useToast } from '../components/Toast.jsx';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts.js';
 
 const PAGE_SIZE = 30;
 
+function todayParam() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 export default function TransactionsPage() {
-  const navigate  = useNavigate();
+  const navigate = useNavigate();
   const showToast = useToast();
 
-  const [user, setUser]             = useState(null);
-  const [transactions, setTx]       = useState([]);
-  const [filter, setFilter]         = useState('all');
-  const [search, setSearch]         = useState('');
-  const [visibleCount, setVisible]  = useState(PAGE_SIZE);
-  const [loading, setLoading]       = useState(true);
+  const [user, setUser] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [serverResults, setServerResults] = useState(null);
-  const [serverTotal, setServerTotal]     = useState(0);
-  const [serverPage, setServerPage]       = useState(1);
-
-  const searchTimer     = useRef(null);
-  const pullStartY      = useRef(0);
-  const pendingDeleteRef = useRef(null);
   const [pullProgress, setPullProgress] = useState(0);
 
-  // Press / to focus the AI input
+  const pullStartY = useRef(0);
+  const pullProgressRef = useRef(0);
+  const pendingDeleteRef = useRef(null);
+  const requestRef = useRef(0);
+
   useKeyboardShortcuts([
     { key: '/', action: () => document.querySelector('.ai-input')?.focus() },
   ]);
 
-  const load = useCallback(async (silent = false) => {
-    const token = localStorage.getItem('token');
-    if (!token) { navigate('/login'); return; }
-    if (!silent) setLoading(true);
-
-    const [uRes, tRes] = await Promise.all([
-      apiFetch('/api/auth/me'),
-      apiFetch('/api/transactions'),
-    ]);
-
-    if (uRes.status === 401) { localStorage.removeItem('token'); navigate('/login'); return; }
-
-    const [uData, tData] = await Promise.all([uRes.json(), tRes.json()]);
-    setUser(uData.user);
-    setTx(Array.isArray(tData) ? tData : []);
-    setLoading(false);
-    setRefreshing(false);
-  }, [navigate]);
-
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { setVisible(PAGE_SIZE); }, [filter, search]);
-
-  // Debounced server-side search with AbortController
-  useEffect(() => {
-    clearTimeout(searchTimer.current);
-    if (!search.trim()) { setServerResults(null); setServerTotal(0); setServerPage(1); return; }
-
-    let abortController;
-    searchTimer.current = setTimeout(async () => {
-      abortController = new AbortController();
-      try {
-        const res = await apiFetch(
-          `/api/transactions?search=${encodeURIComponent(search.trim())}&limit=${PAGE_SIZE}&page=1`,
-          { signal: abortController.signal }
-        );
-        if (res.ok) {
-          const body = await res.json();
-          if (body.data) { setServerResults(body.data); setServerTotal(body.total); setServerPage(1); }
-        }
-      } catch (e) {
-        if (e?.name !== 'AbortError') console.error(e);
+  const loadUser = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
       }
-    }, 300);
+    } catch {
+      // Offline: keep whatever is cached/rendered.
+    }
+  }, []);
 
-    return () => { clearTimeout(searchTimer.current); abortController?.abort(); };
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await apiFetch(
+        `/api/transactions/stats?today=${encodeURIComponent(todayParam())}`
+      );
+      if (res.ok) setStats(await res.json());
+    } catch {
+      // Offline: keep previous stats.
+    }
+  }, []);
+
+  const buildQuery = useCallback((pageNumber) => {
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      page: String(pageNumber),
+      today: todayParam(),
+    });
+    if (filter === 'in' || filter === 'out') params.set('type', filter);
+    if (filter === 'recurring') params.set('recurring', '1');
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    return params.toString();
+  }, [filter, debouncedSearch]);
+
+  const loadPage = useCallback(async (pageNumber, { append = false, silent = false } = {}) => {
+    const requestId = ++requestRef.current;
+    if (append) setLoadingMore(true);
+    else if (!silent) setLoading(true);
+
+    try {
+      const res = await apiFetch(`/api/transactions?${buildQuery(pageNumber)}`);
+      if (requestId !== requestRef.current) return;
+
+      if (!res.ok) {
+        showToast('Errore nel caricamento delle transazioni', 'error');
+        return;
+      }
+
+      const body = await res.json();
+      const data = Array.isArray(body) ? body : (body.data || []);
+      const count = Array.isArray(body) ? data.length : (body.total || 0);
+
+      setItems((prev) => (append ? [...prev, ...data] : data));
+      setTotal(count);
+      setPage(pageNumber);
+    } catch {
+      showToast('Errore di connessione', 'error');
+    } finally {
+      if (requestId === requestRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        setRefreshing(false);
+      }
+    }
+  }, [buildQuery, showToast]);
+
+  const refresh = useCallback(async (silent = true) => {
+    setRefreshing(true);
+    await Promise.all([loadStats(), loadPage(1, { silent })]);
+  }, [loadStats, loadPage]);
+
+  // Initial load.
+  useEffect(() => {
+    if (!getToken()) { navigate('/login'); return; }
+    loadUser();
+    loadStats();
+  }, [loadUser, loadStats, navigate]);
+
+  // Reload page 1 whenever filter or debounced search changes.
+  useEffect(() => {
+    loadPage(1);
+  }, [loadPage]);
+
+  // Debounce search.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
   }, [search]);
 
-  // Pull-to-refresh
+  // Pull-to-refresh (mobile).
   useEffect(() => {
     const THRESHOLD = 70;
-    function onStart(e) { if (window.scrollY > 10) return; pullStartY.current = e.touches[0].clientY; }
+
+    function onStart(e) {
+      if (window.scrollY > 10) return;
+      pullStartY.current = e.touches[0].clientY;
+    }
+
     function onMove(e) {
       if (!pullStartY.current || window.scrollY > 10) return;
       const delta = e.touches[0].clientY - pullStartY.current;
-      if (delta > 0) setPullProgress(Math.min(delta / THRESHOLD, 1));
+      if (delta > 0) {
+        const progress = Math.min(delta / THRESHOLD, 1);
+        pullProgressRef.current = progress;
+        setPullProgress(progress);
+      }
     }
+
     function onEnd() {
-      if (pullProgress >= 1) { setRefreshing(true); navigator.vibrate?.(20); load(true); }
-      setPullProgress(0); pullStartY.current = 0;
+      if (pullProgressRef.current >= 1) {
+        navigator.vibrate?.(20);
+        refresh(true);
+      }
+      pullProgressRef.current = 0;
+      setPullProgress(0);
+      pullStartY.current = 0;
     }
+
     window.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchmove',  onMove,  { passive: true });
-    window.addEventListener('touchend',   onEnd);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
     return () => {
       window.removeEventListener('touchstart', onStart);
-      window.removeEventListener('touchmove',  onMove);
-      window.removeEventListener('touchend',   onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
     };
-  }, [pullProgress, load]);
+  }, [refresh]);
 
-  // Optimistic UI: prepend new tx without full reload
-  function handleSaved(newTx) {
-    if (newTx?.id) setTx(prev => [newTx, ...prev]);
-    else load(true);
+  // A new transaction: reload the first page so filters/search stay correct.
+  function handleSaved() {
+    loadStats();
+    loadPage(1, { silent: true });
   }
 
-  // Undo-delete: hide immediately, actually delete after 4.5s
+  // Undo-delete: hide immediately, actually delete after 4.5s.
   async function deleteTransaction(id) {
-    const tx = transactions.find(t => t.id === id);
+    const tx = items.find((item) => item.id === id);
     if (!tx) return;
 
-    // Flush any previously pending delete
     if (pendingDeleteRef.current) {
       clearTimeout(pendingDeleteRef.current.timer);
-      await apiFetch(`/api/transactions/${pendingDeleteRef.current.id}`, { method: 'DELETE' });
+      try {
+        await apiFetch(`/api/transactions/${pendingDeleteRef.current.id}`, { method: 'DELETE' });
+      } catch {
+        // Ignore: the transaction will be retried on the next refresh.
+      }
       pendingDeleteRef.current = null;
     }
 
-    setTx(prev => prev.filter(t => t.id !== id));
-    if (serverResults) setServerResults(prev => prev.filter(t => t.id !== id));
+    setItems((prev) => prev.filter((item) => item.id !== id));
+    setTotal((value) => Math.max(0, value - 1));
+    setStats((prev) => applyStatsDelta(prev, tx, -1));
 
     const timer = setTimeout(async () => {
-      await apiFetch(`/api/transactions/${id}`, { method: 'DELETE' });
-      pendingDeleteRef.current = null;
+      try {
+        await apiFetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      } catch {
+        // Offline: the optimistic removal stays until the next reload.
+      } finally {
+        pendingDeleteRef.current = null;
+        loadStats();
+      }
     }, 4500);
 
     pendingDeleteRef.current = { id, timer };
@@ -140,58 +217,49 @@ export default function TransactionsPage() {
       fn: () => {
         clearTimeout(timer);
         pendingDeleteRef.current = null;
-        setTx(prev => [tx, ...prev].sort((a, b) => b.id - a.id));
+        setItems((prev) => [tx, ...prev].sort((a, b) => b.id - a.id));
+        setTotal((value) => value + 1);
+        setStats((prev) => applyStatsDelta(prev, tx, 1));
       },
     });
   }
 
   async function editTransaction(id, data) {
-    const res = await apiFetch(`/api/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    const res = await apiFetch(`/api/transactions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+
     if (res.ok) {
       const updated = await res.json();
-      setTx(prev => prev.map(t => t.id === id ? updated : t));
-      if (serverResults) setServerResults(prev => prev.map(t => t.id === id ? updated : t));
+      setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      loadStats();
+      return true;
     }
+
+    const body = await res.json().catch(() => ({}));
+    showToast(body.error || 'Errore durante la modifica', 'error');
+    return false;
   }
 
   async function toggleRecurring(id) {
     const res = await apiFetch(`/api/transactions/${id}/recurring`, { method: 'PATCH' });
     if (res.ok) {
       const { recurring } = await res.json();
-      setTx(prev => prev.map(t => t.id === id ? { ...t, recurring } : t));
+      setItems((prev) => prev.map((item) => (item.id === id ? { ...item, recurring } : item)));
+      loadStats();
     }
   }
 
-  async function loadMoreServerResults() {
-    const nextPage = serverPage + 1;
-    const res = await apiFetch(
-      `/api/transactions?search=${encodeURIComponent(search.trim())}&limit=${PAGE_SIZE}&page=${nextPage}`
-    );
-    if (res.ok) {
-      const body = await res.json();
-      if (body.data) { setServerResults(prev => [...prev, ...body.data]); setServerPage(nextPage); }
-    }
+  function loadMore() {
+    if (loadingMore) return;
+    loadPage(page + 1, { append: true });
   }
 
-  const activeList = serverResults ?? transactions;
+  const counts = stats?.counts || { all: 0, in: 0, out: 0, recurring: 0 };
+  const hasMore = items.length < total;
 
-  const filtered = activeList.filter(t => {
-    if (filter === 'in')        return t.type === 'in';
-    if (filter === 'out')       return t.type === 'out';
-    if (filter === 'recurring') return t.recurring;
-    return true;
-  });
-
-  const visible = serverResults !== null ? filtered : filtered.slice(0, visibleCount);
-  const hasMore = serverResults !== null
-    ? serverResults.length < serverTotal
-    : filtered.length > visibleCount;
-
-  const countIn        = transactions.filter(t => t.type === 'in').length;
-  const countOut       = transactions.filter(t => t.type === 'out').length;
-  const countRecurring = transactions.filter(t => t.recurring).length;
-
-  if (loading) {
+  if (loading && !stats) {
     return (
       <>
         <NavBar />
@@ -217,7 +285,7 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        <WalletCard user={user} transactions={transactions} />
+        <WalletCard user={user} stats={stats} />
         <AIInput onTransactionSaved={handleSaved} />
 
         <div className="search-bar">
@@ -226,42 +294,41 @@ export default function TransactionsPage() {
             type="search"
             placeholder="Cerca… (/ per focalizzare)"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
         <div className="filter-tabs">
-          <button className={`filter-tab ${filter === 'all'       ? 'active' : ''}`} onClick={() => setFilter('all')}>
-            Tutte ({transactions.length})
+          <button className={`filter-tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+            Tutte ({counts.all})
           </button>
-          <button className={`filter-tab ${filter === 'out'       ? 'active' : ''}`} onClick={() => setFilter('out')}>
-            Uscite ({countOut})
+          <button className={`filter-tab ${filter === 'out' ? 'active' : ''}`} onClick={() => setFilter('out')}>
+            Uscite ({counts.out})
           </button>
-          <button className={`filter-tab ${filter === 'in'        ? 'active' : ''}`} onClick={() => setFilter('in')}>
-            Entrate ({countIn})
+          <button className={`filter-tab ${filter === 'in' ? 'active' : ''}`} onClick={() => setFilter('in')}>
+            Entrate ({counts.in})
           </button>
-          {countRecurring > 0 && (
+          {counts.recurring > 0 && (
             <button className={`filter-tab ${filter === 'recurring' ? 'active' : ''}`} onClick={() => setFilter('recurring')}>
-              🔁 ({countRecurring})
+              🔁 ({counts.recurring})
             </button>
           )}
         </div>
 
         <TransactionList
-          transactions={visible}
+          transactions={items}
           onDelete={deleteTransaction}
           onEdit={editTransaction}
           onToggleRecurring={toggleRecurring}
         />
 
         {hasMore && (
-          <button className="load-more-btn"
-            onClick={serverResults ? loadMoreServerResults : () => setVisible(v => v + PAGE_SIZE)}>
-            Carica altri
+          <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Caricamento…' : 'Carica altri'}
           </button>
         )}
 
-        <MonthlySummary transactions={transactions} />
+        <MonthlySummary initialSummary={stats?.currentMonth} />
 
       </div>
     </>

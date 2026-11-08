@@ -7,140 +7,224 @@ import KeywordManager from '../components/KeywordManager.jsx';
 import GoalsCard from '../components/GoalsCard.jsx';
 import AccountSettings from '../components/AccountSettings.jsx';
 import CategoryBudgets from '../components/CategoryBudgets.jsx';
-import { apiFetch } from '../utils/api.js';
+import { apiFetch, clearSession } from '../utils/api.js';
 import SkeletonCard from '../components/SkeletonCard.jsx';
 import { useToast } from '../components/Toast.jsx';
 
 function initials(name = '') {
-  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  return String(name)
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('it-IT', { year: 'numeric', month: 'long' });
+function formatDate(value) {
+  if (!value) return '';
+  // SQLite returns "YYYY-MM-DD HH:MM:SS"; Safari needs the ISO "T".
+  const date = new Date(String(value).replace(' ', 'T'));
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('it-IT', { year: 'numeric', month: 'long' });
+}
+
+function todayParam() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
 function parseCSVLine(line) {
   const cols = [];
   let current = '';
   let inQuote = false;
-  for (const ch of line) {
-    if (ch === '"') { inQuote = !inQuote; }
-    else if (ch === ',' && !inQuote) { cols.push(current); current = ''; }
-    else { current += ch; }
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuote && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuote = !inQuote;
+      }
+    } else if (ch === ',' && !inQuote) {
+      cols.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
   }
   cols.push(current);
   return cols;
 }
 
+function csvEscape(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
 export default function ProfilePage() {
-  const navigate  = useNavigate();
+  const navigate = useNavigate();
   const showToast = useToast();
   const importRef = useRef(null);
-  const [user, setUser]                   = useState(null);
-  const [transactions, setTx]             = useState([]);
+  const [user, setUser] = useState(null);
+  const [stats, setStats] = useState(null);
   const [editingBudget, setEditingBudget] = useState(false);
-  const [budgetInput, setBudgetInput]     = useState('');
-  const [loading, setLoading]             = useState(true);
+  const [budgetInput, setBudgetInput] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) { navigate('/login'); return; }
+    try {
+      const [userRes, statsRes] = await Promise.all([
+        apiFetch('/api/auth/me'),
+        apiFetch(`/api/transactions/stats?today=${encodeURIComponent(todayParam())}`),
+      ]);
 
-    const [uRes, tRes] = await Promise.all([
-      apiFetch('/api/auth/me'),
-      apiFetch('/api/transactions'),
-    ]);
+      if (!userRes.ok) {
+        // Only drop the session when it is really invalid; otherwise LoginPage
+        // would see the token and bounce back here in an endless loop.
+        if (userRes.status === 401 || userRes.status === 404) {
+          clearSession();
+          navigate('/login', { replace: true });
+        } else {
+          showToast('Errore nel caricamento del profilo', 'error');
+        }
+        return;
+      }
 
-    if (uRes.status === 401) { localStorage.removeItem('token'); navigate('/login'); return; }
+      const userData = await userRes.json();
+      const statsData = statsRes.ok ? await statsRes.json() : null;
 
-    const uData = await uRes.json();
-    const tData = await tRes.json();
-    setUser(uData.user);
-    setBudgetInput(uData.user.initial_budget || 0);
-    setTx(Array.isArray(tData) ? tData : []);
-    setLoading(false);
-  }, [navigate]);
+      setUser(userData.user);
+      setBudgetInput(userData.user.initial_budget || 0);
+      setStats(statsData);
+    } catch {
+      showToast('Errore di connessione', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate, showToast]);
 
   useEffect(() => { load(); }, [load]);
 
-  const now          = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear  = now.getFullYear();
+  const current = stats?.currentMonth || { in: 0, out: 0, categories: {} };
+  const totalIn = current.in || 0;
+  const totalOut = current.out || 0;
+  const lastMonthOut = stats?.lastMonth?.out || 0;
+  const balance = (user?.initial_budget || 0) + (stats?.totals?.in || 0) - (stats?.totals?.out || 0);
+  const isNeg = balance < 0;
+  const outDelta = lastMonthOut > 0 ? ((totalOut - lastMonthOut) / lastMonthOut * 100) : null;
 
-  const monthTx = transactions.filter(tx => {
-    if (!tx.date) return false;
-    const [, m, y] = tx.date.split('/');
-    return parseInt(m) - 1 === currentMonth && parseInt(y) === currentYear;
-  });
-
-  const lastMonthDate = new Date(currentYear, currentMonth - 1, 1);
-  const lastMonthTx   = transactions.filter(tx => {
-    if (!tx.date) return false;
-    const [, m, y] = tx.date.split('/');
-    return parseInt(m) - 1 === lastMonthDate.getMonth() && parseInt(y) === lastMonthDate.getFullYear();
-  });
-
-  const totalIn      = monthTx.filter(t => t.type === 'in').reduce((s, t)  => s + t.amount, 0);
-  const totalOut     = monthTx.filter(t => t.type === 'out').reduce((s, t) => s + t.amount, 0);
-  const lastMonthOut = lastMonthTx.filter(t => t.type === 'out').reduce((s, t) => s + t.amount, 0);
-  const balance      = (user?.initial_budget || 0) + totalIn - totalOut;
-  const isNeg        = balance < 0;
-  const outDelta     = lastMonthOut > 0 ? ((totalOut - lastMonthOut) / lastMonthOut * 100) : null;
-
-  const fmt = n => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
+  const fmt = (n) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
   async function saveBudget() {
-    const val = parseFloat(budgetInput);
-    if (isNaN(val)) return;
+    const value = parseFloat(budgetInput);
+    if (!Number.isFinite(value) || value < 0) {
+      showToast('Budget non valido', 'error');
+      return;
+    }
     const res = await apiFetch('/api/user/budget', {
       method: 'POST',
-      body: JSON.stringify({ initial_budget: val }),
+      body: JSON.stringify({ initial_budget: value }),
     });
-    if (res.ok) { const d = await res.json(); setUser(d.user); setEditingBudget(false); }
+    if (res.ok) {
+      const data = await res.json();
+      setUser(data.user);
+      setEditingBudget(false);
+      showToast('Budget aggiornato');
+    } else {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore', 'error');
+    }
   }
 
-  function exportCSV() {
-    const meta   = `#BACKUP,"${(user.username||'').replace(/"/g,'""')}","${(user.email||'').replace(/"/g,'""')}","${(user.full_name||'').replace(/"/g,'""')}",${user.initial_budget||0}`;
+  async function exportCSV() {
+    if (!user) return;
+
+    const res = await apiFetch('/api/transactions');
+    if (!res.ok) {
+      showToast('Errore durante l\'esportazione', 'error');
+      return;
+    }
+    const body = await res.json();
+    const all = Array.isArray(body) ? body : (body.data || []);
+
+    const meta = `#BACKUP,${csvEscape(user.username)},${csvEscape(user.email)},${csvEscape(user.full_name)},${user.initial_budget || 0}`;
     const header = 'data,descrizione,categoria,tipo,importo,source,confidence,raw_input';
-    const rows   = transactions.map(t =>
-      `${t.date},"${(t.description||'').replace(/"/g,'""')}",${t.category},${t.type},${t.amount},${t.source||'manual'},${t.confidence||'low'},"${(t.raw_input||'').replace(/"/g,'""')}"`
-    );
-    const csv  = [meta, header, ...rows].join('\n');
+    const rows = all.map((t) => [
+      t.date,
+      csvEscape(t.description || ''),
+      t.category,
+      t.type,
+      t.amount,
+      t.source || 'manual',
+      t.confidence || 'low',
+      csvEscape(t.raw_input || ''),
+    ].join(','));
+
+    const csv = `\uFEFF${[meta, header, ...rows].join('\r\n')}`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = 'walletai_backup.csv'; a.click();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'walletai_backup.csv';
+    a.click();
     URL.revokeObjectURL(url);
   }
 
-  async function importCSV(e) {
-    const file = e.target.files[0];
+  async function importCSV(event) {
+    const file = event.target.files[0];
     if (!file) return;
-    const text  = await file.text();
-    const lines = text.trim().split('\n');
-    const rows  = [];
+
+    const text = await file.text();
+    const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+    const rows = [];
+
     for (const line of lines) {
-      if (line.startsWith('#') || line.startsWith('data,')) continue;
-      const cols   = parseCSVLine(line);
+      if (!line.trim() || line.startsWith('#') || line.startsWith('data,')) continue;
+      const cols = parseCSVLine(line);
       if (cols.length < 5) continue;
+
       const amount = parseFloat(cols[4]);
-      if (!amount || !['in','out'].includes(cols[3])) continue;
+      if (!Number.isFinite(amount) || amount <= 0 || !['in', 'out'].includes(cols[3])) continue;
+
       rows.push({
-        date: cols[0], description: cols[1], category: cols[2],
-        type: cols[3], amount,
-        source: cols[5] || 'manual', confidence: cols[6] || 'low', raw_input: cols[7] || '',
+        date: cols[0],
+        description: cols[1],
+        category: cols[2],
+        type: cols[3],
+        amount,
+        source: cols[5] || 'manual',
+        confidence: cols[6] || 'low',
+        raw_input: cols[7] || '',
       });
     }
-    if (rows.length === 0) { showToast('Nessuna transazione valida nel file', 'error'); return; }
-    const res = await apiFetch('/api/transactions/import', { method: 'POST', body: JSON.stringify(rows) });
+
+    if (rows.length === 0) {
+      showToast('Nessuna transazione valida nel file', 'error');
+      if (importRef.current) importRef.current.value = '';
+      return;
+    }
+
+    const res = await apiFetch('/api/transactions/import', {
+      method: 'POST',
+      body: JSON.stringify(rows),
+    });
+
     if (res.ok) {
-      const { imported } = await res.json();
-      showToast(`${imported} transazioni importate`);
+      const { imported, skipped } = await res.json();
+      showToast(
+        skipped
+          ? `${imported} importate, ${skipped} scartate`
+          : `${imported} transazioni importate`
+      );
       load();
     } else {
-      showToast('Errore durante l\'importazione', 'error');
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Errore durante l\'importazione', 'error');
     }
+
     if (importRef.current) importRef.current.value = '';
   }
 
@@ -204,7 +288,7 @@ export default function ProfilePage() {
             ) : (
               <div className="budget-edit-form">
                 <input type="number" step="0.01" value={budgetInput}
-                  onChange={e => setBudgetInput(e.target.value)} autoFocus />
+                  onChange={(e) => setBudgetInput(e.target.value)} autoFocus />
                 <button className="btn btn-primary" style={{ padding: '8px 14px', fontSize: '13px' }} onClick={saveBudget}>Salva</button>
                 <button className="btn btn-ghost" style={{ padding: '8px 10px', fontSize: '13px' }} onClick={() => setEditingBudget(false)}>✕</button>
               </div>
@@ -223,13 +307,13 @@ export default function ProfilePage() {
 
           <div className="stat-card accent-ink">
             <div className="stat-label">Totale transazioni</div>
-            <div className="stat-value">{transactions.length}</div>
+            <div className="stat-value">{stats?.counts?.all ?? 0}</div>
           </div>
         </div>
 
-        <CategoryChart transactions={monthTx} />
-        <CategoryBudgets monthTx={monthTx} />
-        <MonthlyChart transactions={transactions} />
+        <CategoryChart categories={current.categories} />
+        <CategoryBudgets spending={current.categories} />
+        <MonthlyChart months={stats?.months} />
         <GoalsCard monthlySavings={totalIn - totalOut} />
         <KeywordManager />
         <AccountSettings />

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { publicFetch } from '../utils/api.js';
+import { clearApiCaches, getToken, publicFetch } from '../utils/api.js';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -13,6 +13,10 @@ export default function LoginPage() {
     full_name: '', username: '', email: '', password: '', confirm_password: '',
   });
 
+  useEffect(() => {
+    if (getToken()) navigate('/profile', { replace: true });
+  }, [navigate]);
+
   async function handleLogin(e) {
     e.preventDefault();
     setError('');
@@ -21,10 +25,14 @@ export default function LoginPage() {
     try {
       const res = await publicFetch('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify(loginForm),
+        body: JSON.stringify({
+          username: loginForm.username.trim(),
+          password: loginForm.password,
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Errore di accesso'); return; }
+      await clearApiCaches();
       localStorage.setItem('token', data.token);
       if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
       navigate('/profile');
@@ -53,10 +61,16 @@ export default function LoginPage() {
       const { confirm_password, ...payload } = regForm;
       const res = await publicFetch('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          full_name: payload.full_name.trim(),
+          username: payload.username.trim(),
+          email: payload.email.trim().toLowerCase(),
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Errore di registrazione'); return; }
+      await clearApiCaches();
       localStorage.setItem('token', data.token);
       if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
       navigate('/profile');

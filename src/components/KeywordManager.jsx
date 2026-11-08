@@ -52,7 +52,7 @@ export default function KeywordManager() {
               <span className={`badge ${kw.type === 'in' ? 'badge-entrata' : 'badge-altro'}`}>
                 {kw.type === 'in' ? 'entrata' : 'uscita'}
               </span>
-              <button className="keyword-delete" onClick={() => deleteKeyword(kw.id)} title="Elimina">×</button>
+              <button className="keyword-delete" onClick={() => deleteKeyword(kw.id)} title="Elimina" aria-label="Elimina parola chiave">×</button>
             </div>
           ))}
         </div>

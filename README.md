@@ -23,7 +23,9 @@
 
 ## What is WalletAI
 
-WalletAI is a full-stack web app for tracking income and expenses naturally: type a phrase like `"sushi 22€ yesterday"` or `"received salary 1200"` and the app automatically understands the amount, category, type, and date.
+WalletAI is a full-stack web app for tracking income and expenses naturally: type an Italian phrase like `"sushi 22€ ieri"` or `"stipendio 1200"` and the app automatically understands the amount, category, type, and date.
+
+> The parser, the UI and the categories are in **Italian**: English phrases are not recognized by the keyword dictionary.
 
 Parsing works through a **3-level system** that always guarantees a result: it first tries AI, then a keyword dictionary, and finally offers a pre-filled manual form. The AI can run locally with **Ollama** or in the cloud with **Groq** or **OpenRouter** (both free) — same API, just change the URL in `.env`.
 
@@ -32,9 +34,9 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 ## Features
 
 ### Core
-- **Authentication** — registration and login with JWT (7d access + 30d refresh), password hashed with bcrypt
-- **Hardened API** — rate limiting on auth endpoints (5 req/min), secure HTTP headers via helmet, strict input validation, Content-Security-Policy
-- **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → keyword dictionary → manual form
+- **Authentication** — registration and login with JWT (7d access + 30d refresh), password hashed with bcrypt; `token_version` revokes every token on logout/password change
+- **Hardened API** — rate limiting on login (10 failed req/min), register (5/min), token refresh (30/min) and text parsing (30/min per user), secure HTTP headers via helmet, strict validation of dates/amounts/enums, JSON error handler (no stack traces), CSP
+- **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → keyword dictionary → manual form; AI responses are validated and cached for 10 minutes
 - **Multi-transaction parsing** — type `"sushi 22€, taxi 8€, cinema 15€"` and all three are parsed and saved at once
 - **Saved templates** — star any input to save it as a quick-access chip for repeated transactions
 - **Preview before saving** — shows parsed data with source badge (AI / Auto / Manual) and allows inline corrections before confirming
@@ -42,26 +44,27 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 
 ### Finance
 - **Savings goals** — create goals with target amount, current savings and optional deadline; automatic month projection based on current savings rate
-- **Category budgets** — set monthly spending limits per category; color-coded progress bars (teal → amber → red)
+- **Category budgets** — set monthly spending limits for every category (even before the first expense); color-coded progress bars (teal → amber → red)
 - **Month-over-month delta** — shows % change in spending vs. the previous month
 - **Daily rate + forecast** — calculates your daily spending rate and projects total expenses for the end of the month
 - **Top spending category** — highlights where most of your monthly budget goes
+- **All-time balance** — initial budget + all income − all expenses, while monthly cards remain month-scoped
 
 ### Data & Backup
-- **CSV export** — download all transactions including account metadata
-- **CSV import** — bulk import from a compatible backup file (up to 5 000 rows, transactional)
-- **Auto backup via GitHub Gist** — every write is mirrored to a private Gist; on redeploy the database is restored automatically
+- **CSV export** — download all transactions including account metadata; quote/newline-safe
+- **CSV import** — bulk import up to 5 000 rows (2 MB JSON limit, transactional, invalid rows skipped and reported)
+- **Auto backup via GitHub Gist** — users, transactions, keywords, category budgets and goals; writes are debounced/queued, requests time out after 8 s, and data is restored automatically on redeploy
 
 ### UX & Performance
-- **PWA** — installable on any device; workbox service worker caches API responses (NetworkFirst) for offline reads
+- **PWA** — installable on any device, with proper 192/512 + maskable icons and an Apple touch icon; Workbox caches API responses (NetworkFirst) for offline reads, cleared on login/logout
 - **Offline banner** — detects connectivity loss and shows a persistent notice
-- **Optimistic UI** — new transactions appear instantly without waiting for a server round-trip
-- **Server-side search & pagination** — debounced (300 ms) full-text search with AbortController; infinite scroll with 30-item pages
+- **Optimistic delete** — deleted transactions and wallet totals update instantly, before the server confirms
+- **Server-side search, filters and pagination** — debounced (300 ms) full-text search, type/recurring filters and 30-item pages with "load more"
 - **Pull-to-refresh** — swipe down on mobile to silently reload
 - **Keyboard shortcut** — press `/` anywhere to focus the AI input
 - **IntersectionObserver lazy charts** — category and monthly charts animate only when scrolled into view
 - **Skeleton loaders** — placeholder cards during initial data fetch
-- **Account settings** — change password, delete account (with confirmation)
+- **Account settings** — change password (revokes old tokens), delete account (with confirmation)
 - **Mobile-first** — bottom navigation bar, 44 px touch targets, safe area for notch/Dynamic Island, `prefers-reduced-motion` support
 
 ---
@@ -70,7 +73,7 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18 + Vite 5 + React Router 6 |
+| Frontend | React 18 + Vite 5 + React Router 7 |
 | Backend | Node.js + Express |
 | Database | SQLite via `better-sqlite3` (synchronous) |
 | Authentication | JWT (`jsonwebtoken`) + `bcryptjs` |
@@ -94,7 +97,7 @@ The core of the app. Every level always returns the same object:
   "amount": 22,
   "type": "out",
   "description": "sushi",
-  "category": "food",
+  "category": "cibo",
   "date": "02/06/2026",
   "source": "ai | dictionary | manual",
   "confidence": "high | medium | low"
@@ -102,10 +105,10 @@ The core of the app. Every level always returns the same object:
 ```
 
 ### Level 1 — AI (Ollama · Groq · OpenRouter)
-Calls the `/v1/chat/completions` endpoint (OpenAI-compatible format) with an adaptive timeout: **3 s** for local Ollama, **8 s** for cloud services. The prompt is in Italian and expects a pure JSON response. If the call fails or times out → next level.
+Calls the `/v1/chat/completions` endpoint (OpenAI-compatible format) with an adaptive timeout: **3 s** for local Ollama, **8 s** for cloud services (`AI_TIMEOUT_MS` overrides it). The prompt is in Italian and expects a pure JSON response. The response is validated (amount, type, category, date) and cached in-process for 10 minutes. If the call fails or times out → next level.
 
 ### Level 2 — Local dictionary
-Over **150 Italian keywords** organized by category. The **user's custom keywords** take priority and are checked first. Extracts amount via regex, recognizes Italian dates (`ieri/yesterday`, `lunedì/Monday`, `12/03`…) and builds a clean description by removing stopwords.
+Over **150 Italian keywords** organized by category. The **user's custom keywords** take priority and are checked first. Extracts amounts with Italian separators (`1.234,56€`), ignores dates, recognizes Italian dates (`ieri`, `l'altro ieri`, `lunedì`, `12/03`, `2026-11-03`…) and builds a clean description by removing stopwords. The client sends its own date, so "today"/"yesterday" are correct even when the server runs in UTC.
 
 ### Level 3 — Manual form
 If no pattern matches, shows a pre-filled form with the detected amount. Grey "Manual" badge.
@@ -117,20 +120,23 @@ If no pattern matches, shows a pre-filled form with the detected amount. Grey "M
 ```
 walletai/
 ├── server/
-│   ├── index.js                  # Express entry point + CSP headers
-│   ├── db.js                     # SQLite init + schema migrations
+│   ├── index.js                  # Startup, env validation, graceful shutdown
+│   ├── app.js                    # Express app, CORS, compression, error handler
+│   ├── db.js                     # SQLite init + schema migrations + indexes
 │   ├── middleware/
-│   │   └── auth.js               # JWT guard
+│   │   └── auth.js               # JWT guard (access type + token_version)
 │   ├── routes/
-│   │   ├── auth.js               # /api/auth/* (login, register, change-password, delete account)
-│   │   ├── transactions.js       # /api/transactions/* (CRUD, parse, import, search, pagination)
+│   │   ├── auth.js               # /api/auth/* (login, register, refresh, logout, change-password, delete account)
+│   │   ├── transactions.js       # /api/transactions/* (CRUD, parse, import, stats, summary)
 │   │   ├── user.js               # /api/user/* (budget, keywords, category-budgets)
 │   │   └── goals.js              # /api/goals/* (savings goals CRUD)
 │   └── utils/
-│       ├── parser.js             # 3-level parsing cascade
+│       ├── parser.js             # 3-level parsing cascade + AI cache
 │       ├── dateParser.js         # Italian dates → DD/MM/YYYY
+│       ├── validate.js           # Dates, amounts, categories, enums
 │       ├── sanitize.js           # Input sanitization helpers
-│       ├── logger.js             # Structured request logger
+│       ├── asyncHandler.js       # Express 4 async error wrapper
+│       ├── logger.js             # Structured logger
 │       └── backup.js             # Auto backup/restore via GitHub Gist
 ├── src/
 │   ├── main.jsx
@@ -138,19 +144,20 @@ walletai/
 │   ├── hooks/
 │   │   └── useKeyboardShortcuts.js
 │   ├── utils/
-│   │   └── api.js                # Centralized apiFetch + token refresh
+│   │   ├── api.js                # apiFetch + token refresh + cache clearing
+│   │   └── stats.js              # Optimistic aggregate updates
 │   ├── pages/
 │   │   ├── LoginPage.jsx         # Sign in / Sign up
 │   │   ├── ProfilePage.jsx       # Stats, goals, budgets, account settings, CSV
-│   │   └── TransactionsPage.jsx  # List + AI input + search + filters
+│   │   └── TransactionsPage.jsx  # Paginated list + AI input + search + filters
 │   ├── components/
 │   │   ├── NavBar.jsx            # Top bar (desktop) + Bottom nav (mobile) + scroll blur
-│   │   ├── WalletCard.jsx        # Balance card — animated count-up, forecast, progress bar
+│   │   ├── WalletCard.jsx        # All-time balance — animated count-up, forecast
 │   │   ├── AIInput.jsx           # Text input → multi-tx → preview → confirm/edit + templates
 │   │   ├── TransactionList.jsx   # List grouped by date with edit / recurring toggle
 │   │   ├── CategoryChart.jsx     # CSS bars by category (lazy IntersectionObserver)
 │   │   ├── MonthlyChart.jsx      # CSS chart last 6 months (lazy IntersectionObserver)
-│   │   ├── MonthlySummary.jsx    # Collapsible monthly summary
+│   │   ├── MonthlySummary.jsx    # Collapsible monthly summary (server-side per month)
 │   │   ├── CategoryBudgets.jsx   # Per-category budget limits + progress bars
 │   │   ├── GoalsCard.jsx         # Savings goals with month projection
 │   │   ├── AccountSettings.jsx   # Change password + delete account
@@ -164,16 +171,26 @@ walletai/
 │       └── components.css        # Component styles + responsive + dark mode
 ├── public/
 │   ├── walletAI_logo.png
+│   ├── icon-192.png              # PWA icons (square)
+│   ├── icon-512.png
+│   ├── icon-maskable-512.png
+│   ├── apple-touch-icon.png
 │   ├── _redirects                # Netlify proxy + SPA fallback rules
 │   └── _headers                  # Netlify security headers (CSP, HSTS…)
 ├── tests/
-│   └── parser.test.js            # Vitest unit tests for the parsing cascade
+│   ├── parser.test.js            # Amounts, dictionary, descriptions
+│   ├── dateParser.test.js        # Italian dates + client timezone
+│   ├── validate.test.js          # Date/enum validation
+│   ├── stats.test.js             # Optimistic delete/undo aggregates
+│   └── api.test.js               # API integration tests (supertest)
+├── .github/workflows/ci.yml      # Tests + build on push/PR
 ├── index.html
 ├── vite.config.js                # Dev proxy /api → :3001 + PWA manifest + Workbox
 ├── vitest.config.js
 ├── .nvmrc                        # Node.js version pin (v20)
 ├── .env.example
 ├── .gitignore
+├── LICENSE
 └── package.json
 ```
 
@@ -189,6 +206,7 @@ CREATE TABLE users (
   password_hash  TEXT NOT NULL,
   full_name      TEXT NOT NULL,
   initial_budget REAL DEFAULT 0,
+  token_version  INTEGER NOT NULL DEFAULT 0,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -242,23 +260,26 @@ CREATE TABLE goals (
 ### Auth
 | Method | Endpoint | Body | Notes |
 |--------|----------|------|-------|
-| POST | `/api/auth/register` | `{ username, email, password, full_name }` | Returns `{ token, user }` |
-| POST | `/api/auth/login` | `{ username, password }` | Returns `{ token, refreshToken, user }` |
-| POST | `/api/auth/refresh` | `{ refreshToken }` | Returns new `{ token }` |
+| POST | `/api/auth/register` | `{ username, email, password, full_name }` | Returns `{ token, refreshToken, user }`; 5 req/min |
+| POST | `/api/auth/login` | `{ username, password }` | Returns `{ token, refreshToken, user }`; 10 failed req/min |
+| POST | `/api/auth/refresh` | `{ refreshToken }` | Returns new `{ token, refreshToken }` |
+| POST | `/api/auth/logout` | — (Bearer token) | Revokes every token for the account |
 | GET  | `/api/auth/me` | — (Bearer token) | Returns `{ user }` |
-| POST | `/api/auth/change-password` | `{ currentPassword, newPassword }` | Min 8 chars |
+| POST | `/api/auth/change-password` | `{ currentPassword, newPassword }` | Min 8 chars; revokes old tokens and returns a new pair |
 | DELETE | `/api/auth/account` | `{ password }` | Deletes all user data |
 
 ### Transactions
 | Method | Endpoint | Notes |
 |--------|----------|-------|
-| POST   | `/api/transactions/parse` | Parses text — does not save |
+| POST   | `/api/transactions/parse` | Parses text (`raw_text`, optional `today`) — does not save; 30 req/min |
 | POST   | `/api/transactions` | Saves a transaction |
-| GET    | `/api/transactions` | Plain array; add `?search=&page=&limit=` for paginated `{ data, total, page, pages }` |
+| GET    | `/api/transactions` | Filters: `?search=&type=in\|out&recurring=1&month=YYYY-MM`. Without `limit` returns a plain array; with `limit` (max 200) and `page` returns `{ data, total, page, limit, pages }` |
 | PUT    | `/api/transactions/:id` | Update a transaction |
 | DELETE | `/api/transactions/:id` | |
 | PATCH  | `/api/transactions/:id/recurring` | Toggle recurring flag |
-| POST   | `/api/transactions/import` | Bulk insert up to 5 000 rows (transactional) |
+| POST   | `/api/transactions/import` | Bulk insert up to 5 000 rows (transactional; invalid rows skipped) |
+| GET    | `/api/transactions/stats` | Aggregates: counts, all-time totals, current/last month, last 6 months |
+| GET    | `/api/transactions/summary` | Per-month totals and categories; `?month=YYYY-MM` |
 
 ### User
 | Method | Endpoint | Notes |
@@ -336,7 +357,9 @@ npm run dev
 ### 5. Run tests
 
 ```bash
-npm test
+npm test        # unit + API integration tests
+npm run build   # production build
+npm run check   # tests + build
 ```
 
 ---
@@ -410,6 +433,8 @@ Open `public/_redirects` and replace the backend URL with your Render URL:
 /*      /index.html   200
 ```
 
+Update the same URL in `netlify.toml` (used for Git-based deploys) and in the `connect-src` directive of `public/_headers`, otherwise the CSP blocks direct API calls.
+
 ### Step 4 — Deploy frontend on Netlify
 
 1. Create an account at [netlify.com](https://netlify.com)
@@ -425,7 +450,9 @@ The `public/_redirects` file (copied into `dist/` by Vite) handles:
 
 ## Persistent Data on Render Free Tier
 
-Render's free tier resets the filesystem on every redeploy. WalletAI solves this with an **automatic GitHub Gist backup**: every write (transaction, keyword, budget) is mirrored to a private Gist; on startup, if the database is empty, the data is restored automatically.
+Render's free tier resets the filesystem on every redeploy. WalletAI solves this with an **automatic GitHub Gist backup**: every write (transaction, keyword, budget, goal, password change, logout) is mirrored to a **secret Gist**; on startup, if the database is empty, the data is restored automatically.
+
+The backup is **coalesced/debounced** (a multi-transaction save produces one snapshot), requests time out after 8 seconds, and the restore includes **users, transactions, keywords, category budgets and goals**. If GitHub is unreachable the server still starts.
 
 ### Setup (one-time)
 
@@ -447,6 +474,8 @@ GITHUB_GIST_ID = (leave empty for now)
 **4.** Copy that ID and add `GITHUB_GIST_ID` to Render env vars. From now on every redeploy restores the database automatically — no manual steps needed.
 
 > If `GITHUB_TOKEN` is not set the backup is silently skipped and the app works normally.
+
+> ⚠️ A secret Gist is **unlisted, not private**: anyone who has its URL can read it without logging in. The backup contains password hashes and every transaction, so never share the Gist ID or URL.
 
 ---
 
@@ -493,18 +522,18 @@ Full dark mode support via `@media (prefers-color-scheme: dark)`.
 
 ## Supported Categories
 
-| Emoji | Category | Type | Example keywords |
-|-------|----------|------|-----------------|
-| 🍽️ | food | expense | sushi, pizza, supermarket, bar, breakfast |
-| 🚗 | transport | expense | petrol, train, uber, parking, toll |
-| 💊 | health | expense | pharmacy, dentist, gym, doctor |
-| 🎮 | leisure | expense | netflix, cinema, spotify, videogame |
-| 🎁 | gifts | expense | gift, birthday, flowers, christmas |
-| 🏠 | home | expense | rent, bill, ikea, internet |
-| 🛍️ | shopping | expense | zara, amazon, shoes, phone |
-| 💼 | work | expense | course, university, work subscription |
-| 💰 | income | income | salary, bank transfer, freelance, refund |
-| 📦 | other | expense | everything else |
+| Emoji | Category (API value) | Meaning | Type | Example keywords |
+|-------|----------|---------|------|-----------------|
+| 🍽️ | `cibo` | food | expense | sushi, pizza, supermercato, bar, colazione |
+| 🚗 | `trasporti` | transport | expense | benzina, treno, uber, parcheggio, pedaggio |
+| 💊 | `salute` | health | expense | farmacia, dentista, palestra, medico |
+| 🎮 | `svago` | leisure | expense | netflix, cinema, spotify, videogioco |
+| 🎁 | `regali` | gifts | expense | regalo, compleanno, fiori, natale |
+| 🏠 | `casa` | home | expense | affitto, bolletta, ikea, internet |
+| 🛍️ | `shopping` | shopping | expense | zara, amazon, scarpe, telefono |
+| 💼 | `lavoro` | work | expense | corso, università, software |
+| 💰 | `entrata` | income | income | stipendio, bonifico, freelance, rimborso |
+| 📦 | `altro` | other | expense | everything else |
 
 ---
 

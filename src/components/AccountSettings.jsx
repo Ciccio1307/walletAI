@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '../utils/api.js';
+import { apiFetch, clearApiCaches, clearSession } from '../utils/api.js';
 import { useToast } from './Toast.jsx';
 
 export default function AccountSettings() {
@@ -19,17 +19,28 @@ export default function AccountSettings() {
     if (pwForm.next !== pwForm.confirm) { setError('Le password non coincidono'); return; }
     if (pwForm.next.length < 8) { setError('Minimo 8 caratteri'); return; }
     setSaving(true);
-    const res = await apiFetch('/api/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }),
-    });
-    setSaving(false);
+    let res;
+    try {
+      res = await apiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }),
+      });
+    } catch {
+      setError('Errore di connessione');
+      return;
+    } finally {
+      setSaving(false);
+    }
     if (res.ok) {
+      const data = await res.json();
+      // Password change revokes old tokens; store the new pair.
+      if (data.token) localStorage.setItem('token', data.token);
+      if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
       showToast('Password aggiornata');
       setSection(null);
       setPwForm({ current: '', next: '', confirm: '' });
     } else {
-      const d = await res.json();
+      const d = await res.json().catch(() => ({}));
       setError(d.error || 'Errore');
     }
   }
@@ -37,17 +48,24 @@ export default function AccountSettings() {
   async function deleteAccount(e) {
     e.preventDefault();
     setSaving(true);
-    const res = await apiFetch('/api/auth/account', {
-      method: 'DELETE',
-      body: JSON.stringify({ password: delPw }),
-    });
-    setSaving(false);
+    let res;
+    try {
+      res = await apiFetch('/api/auth/account', {
+        method: 'DELETE',
+        body: JSON.stringify({ password: delPw }),
+      });
+    } catch {
+      setError('Errore di connessione');
+      return;
+    } finally {
+      setSaving(false);
+    }
     if (res.ok) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('refresh_token');
+      await clearApiCaches();
+      clearSession();
       navigate('/login');
     } else {
-      const d = await res.json();
+      const d = await res.json().catch(() => ({}));
       setError(d.error || 'Errore');
     }
   }

@@ -3,20 +3,25 @@ import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { saveBackup } from '../utils/backup.js';
 import { sanitize } from '../utils/sanitize.js';
+import { CATEGORIES, EXPENSE_CATEGORIES } from '../utils/validate.js';
 
 const router = Router();
 router.use(requireAuth);
 
 router.post('/budget', (req, res) => {
-  const { initial_budget } = req.body;
-  if (initial_budget === undefined || isNaN(Number(initial_budget))) {
+  const value = typeof req.body.initial_budget === 'number'
+    ? req.body.initial_budget
+    : Number(req.body.initial_budget);
+
+  if (!Number.isFinite(value) || value < 0 || value > 1e12) {
     return res.status(400).json({ error: 'Budget non valido' });
   }
 
-  db.prepare('UPDATE users SET initial_budget = ? WHERE id = ?').run(Number(initial_budget), req.userId);
-  const user = db.prepare('SELECT id, username, email, full_name, initial_budget, created_at FROM users WHERE id = ?').get(req.userId);
+  db.prepare('UPDATE users SET initial_budget = ? WHERE id = ?').run(value, req.userId);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+  const { password_hash, token_version, ...safeUser } = user;
   saveBackup();
-  res.json({ user });
+  res.json({ user: safeUser });
 });
 
 router.get('/keywords', (req, res) => {
@@ -25,10 +30,25 @@ router.get('/keywords', (req, res) => {
 });
 
 router.post('/keywords', (req, res) => {
-  const { keyword, category, type } = req.body;
-  const cleanKeyword = sanitize(keyword, 100)?.toLowerCase();
+  const cleanKeyword = sanitize(String(req.body.keyword || '').trim(), 100).toLowerCase();
+  const category = String(req.body.category || '').trim().toLowerCase();
+  const type = req.body.type;
+
   if (!cleanKeyword || !category || !type) {
     return res.status(400).json({ error: 'keyword, category e type sono obbligatori' });
+  }
+  if (!CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: 'Categoria non valida' });
+  }
+  if (type !== 'in' && type !== 'out') {
+    return res.status(400).json({ error: "type deve essere 'in' o 'out'" });
+  }
+
+  const duplicate = db.prepare(
+    'SELECT id FROM user_keywords WHERE user_id = ? AND keyword = ? COLLATE NOCASE'
+  ).get(req.userId, cleanKeyword);
+  if (duplicate) {
+    return res.status(409).json({ error: 'Questa parola chiave esiste già' });
   }
 
   const result = db.prepare(
@@ -44,7 +64,7 @@ router.delete('/keywords/:id', (req, res) => {
   const kw = db.prepare('SELECT id FROM user_keywords WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
   if (!kw) return res.status(404).json({ error: 'Keyword non trovata' });
 
-  db.prepare('DELETE FROM user_keywords WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM user_keywords WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   saveBackup();
   res.json({ ok: true });
 });
@@ -55,20 +75,29 @@ router.get('/category-budgets', (req, res) => {
 });
 
 router.put('/category-budgets/:category', (req, res) => {
-  const { budget_amount } = req.body;
-  const cat = sanitize(req.params.category, 50);
-  if (typeof budget_amount !== 'number' || budget_amount < 0) {
+  const category = sanitize(String(req.params.category || '').trim().toLowerCase(), 50);
+  const budget = Number(req.body.budget_amount);
+
+  if (!EXPENSE_CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: 'Categoria non valida' });
+  }
+  if (!Number.isFinite(budget) || budget < 0 || budget > 1e12) {
     return res.status(400).json({ error: 'budget_amount non valido' });
   }
-  if (budget_amount === 0) {
-    db.prepare('DELETE FROM category_budgets WHERE user_id = ? AND category = ?').run(req.userId, cat);
+
+  if (budget === 0) {
+    db.prepare('DELETE FROM category_budgets WHERE user_id = ? AND category = ?').run(req.userId, category);
+    saveBackup();
     return res.json({ deleted: true });
   }
+
   db.prepare(
     `INSERT INTO category_budgets (user_id, category, budget_amount) VALUES (?, ?, ?)
      ON CONFLICT(user_id, category) DO UPDATE SET budget_amount = excluded.budget_amount`
-  ).run(req.userId, cat, budget_amount);
-  res.json({ category: cat, budget_amount });
+  ).run(req.userId, category, budget);
+
+  saveBackup();
+  res.json({ category, budget_amount: budget });
 });
 
 export default router;

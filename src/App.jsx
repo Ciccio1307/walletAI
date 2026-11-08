@@ -23,6 +23,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/profile" replace />} />
             <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
             <Route path="/transactions" element={<RequireAuth><TransactionsPage /></RequireAuth>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
       </ToastProvider>

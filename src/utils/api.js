@@ -1,29 +1,68 @@
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
+export function getToken() {
+  return localStorage.getItem('token');
+}
+
+export function clearSession() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('wai_templates');
+}
+
+/**
+ * Removes API response caches (transactions / user profile).
+ * Called on login and logout so a shared browser cannot show another
+ * account's cached data offline.
+ */
+export async function clearApiCaches() {
+  if (typeof caches === 'undefined') return;
+  try {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((key) => key.startsWith('api-'))
+        .map((key) => caches.delete(key))
+    );
+  } catch {
+    // Cache API unavailable (e.g. private mode): nothing to do.
+  }
+}
+
 async function tryRefresh() {
-  const rt = localStorage.getItem('refresh_token');
-  if (!rt) return false;
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) return false;
+
   try {
     const res = await fetch(`${BASE}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: rt }),
+      body: JSON.stringify({ refreshToken }),
     });
-    if (!res.ok) { localStorage.removeItem('refresh_token'); return false; }
-    const { token } = await res.json();
-    localStorage.setItem('token', token);
+
+    if (!res.ok) {
+      clearSession();
+      return false;
+    }
+
+    const data = await res.json();
+    if (!data.token) return false;
+
+    localStorage.setItem('token', data.token);
+    if (data.refreshToken) localStorage.setItem('refresh_token', data.refreshToken);
     return true;
   } catch {
+    // Network error: keep the session, it may simply be offline.
     return false;
   }
 }
 
 function makeHeaders(extra = {}) {
-  return {
-    'Authorization': `Bearer ${localStorage.getItem('token')}`,
-    'Content-Type': 'application/json',
-    ...extra,
-  };
+  const headers = { ...extra };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  return headers;
 }
 
 export async function apiFetch(url, opts = {}) {
@@ -33,6 +72,10 @@ export async function apiFetch(url, opts = {}) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       res = await fetch(`${BASE}${url}`, { ...opts, headers: makeHeaders(opts.headers) });
+    } else if (!localStorage.getItem('refresh_token') && window.location.pathname !== '/login') {
+      // No refresh token and access token rejected: force a clean login.
+      clearSession();
+      window.location.assign('/login');
     }
   }
 

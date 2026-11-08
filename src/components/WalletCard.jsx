@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 function useCountUp(target, duration = 650) {
   const [value, setValue] = useState(0);
   const prevRef = useRef(null);
-  const rafRef  = useRef(null);
+  const rafRef = useRef(null);
 
   useEffect(() => {
     const from = prevRef.current === null ? 0 : prevRef.current;
@@ -15,11 +15,11 @@ function useCountUp(target, duration = 650) {
     cancelAnimationFrame(rafRef.current);
 
     function tick(now) {
-      const t    = Math.min((now - startTime) / duration, 1);
-      const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      const t = Math.min((now - startTime) / duration, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
       setValue(from + diff * ease);
       if (t < 1) rafRef.current = requestAnimationFrame(tick);
-      else        setValue(target);
+      else setValue(target);
     }
 
     rafRef.current = requestAnimationFrame(tick);
@@ -29,40 +29,41 @@ function useCountUp(target, duration = 650) {
   return value;
 }
 
-export default function WalletCard({ user, transactions }) {
-  const now          = new Date();
+export default function WalletCard({ user, stats }) {
+  const now = new Date();
   const currentMonth = now.getMonth();
-  const currentYear  = now.getFullYear();
+  const currentYear = now.getFullYear();
 
-  const monthTx = transactions.filter(tx => {
-    if (!tx.date) return false;
-    const [, m, y] = tx.date.split('/');
-    return parseInt(m) - 1 === currentMonth && parseInt(y) === currentYear;
-  });
+  const current = stats?.currentMonth || { in: 0, out: 0, categories: {} };
+  const totals = stats?.totals || { in: 0, out: 0 };
 
-  const totalIn  = monthTx.filter(t => t.type === 'in').reduce((s, t)  => s + t.amount, 0);
-  const totalOut = monthTx.filter(t => t.type === 'out').reduce((s, t) => s + t.amount, 0);
-  const balance  = (user?.initial_budget || 0) + totalIn - totalOut;
-  const isNeg    = balance < 0;
+  const totalIn = current.in || 0;
+  const totalOut = current.out || 0;
 
-  const available = (user?.initial_budget || 0) + totalIn;
-  const pct       = available > 0 ? Math.min((totalOut / available) * 100, 100) : 0;
+  // "Saldo attuale" is now all-time: initial budget + all income - all expenses.
+  const balance = (user?.initial_budget || 0) + (totals.in || 0) - (totals.out || 0);
+  const isNeg = balance < 0;
 
-  const EMOJI = { cibo:'🍽️',trasporti:'🚗',salute:'💊',svago:'🎮',regali:'🎁',casa:'🏠',shopping:'🛍️',lavoro:'💼',entrata:'💰',altro:'📦' };
-  const categoryTotals = monthTx.filter(t => t.type === 'out').reduce((acc, t) => {
-    acc[t.category] = (acc[t.category] || 0) + t.amount; return acc;
-  }, {});
-  const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+  const available = (user?.initial_budget || 0) + (totals.in || 0);
+  const pct = available > 0 ? Math.min(((totals.out || 0) / available) * 100, 100) : 0;
 
-  const daysPassed  = now.getDate();
+  const EMOJI = {
+    cibo: '🍽️', trasporti: '🚗', salute: '💊', svago: '🎮', regali: '🎁',
+    casa: '🏠', shopping: '🛍️', lavoro: '💼', entrata: '💰', altro: '📦',
+  };
+
+  const topCategory = Object.entries(current.categories || {})
+    .sort((a, b) => b[1] - a[1])[0];
+
+  const daysPassed = now.getDate();
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const dailyRate   = daysPassed > 0 ? totalOut / daysPassed : 0;
-  const projected   = dailyRate * daysInMonth;
+  const dailyRate = daysPassed > 0 ? totalOut / daysPassed : 0;
+  const projected = dailyRate * daysInMonth;
 
-  const animBalance  = useCountUp(balance);
-  const animTotalIn  = useCountUp(totalIn,  500);
+  const animBalance = useCountUp(balance);
+  const animTotalIn = useCountUp(totalIn, 500);
   const animTotalOut = useCountUp(totalOut, 500);
-  const animPct      = useCountUp(pct, 800);
+  const animPct = useCountUp(pct, 800);
 
   const fmt = (n) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
@@ -105,7 +106,7 @@ export default function WalletCard({ user, transactions }) {
         </div>
         <div className="wallet-stat-item">
           <div className="wallet-stat-label">Transazioni</div>
-          <div className="wallet-stat-value">{transactions.length}</div>
+          <div className="wallet-stat-value">{stats?.counts?.all ?? 0}</div>
         </div>
       </div>
     </div>

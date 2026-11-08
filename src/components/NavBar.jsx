@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { apiFetch, clearApiCaches, clearSession } from '../utils/api.js';
 
 export default function NavBar() {
   const navigate = useNavigate();
@@ -12,9 +13,19 @@ export default function NavBar() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  function logout() {
-    localStorage.removeItem('token');
-    localStorage.removeItem('refresh_token');
+  async function logout() {
+    try {
+      // Revokes tokens server-side (all devices). Do not block the UI if the
+      // network is slow or offline.
+      await Promise.race([
+        apiFetch('/api/auth/logout', { method: 'POST' }),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch {
+      // Offline: still clear the local session.
+    }
+    await clearApiCaches();
+    clearSession();
     navigate('/login');
   }
 

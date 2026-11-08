@@ -808,6 +808,16 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+.summary-header:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.summary-loading {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 8px 0;
+}
 .summary-month-nav {
   display: flex;
   align-items: center;
@@ -988,11 +998,19 @@
   position: relative;
   overflow: hidden;
 }
+/* The row must sit above the absolutely-positioned swipe background,
+   otherwise the red delete area is always visible over the amount. */
+.tx-row-wrapper > .tx-row {
+  position: relative;
+  z-index: 1;
+}
 .tx-swipe-bg {
   position: absolute;
   inset: 0;
   left: auto;
+  bottom: 6px; /* matches .tx-row margin-bottom */
   width: 90px;
+  border-radius: 0 12px 12px 0;
   background: var(--red);
   display: flex;
   align-items: center;
@@ -1419,7 +1437,7 @@
 /* ═══════════════════════════════════════════
    ACCOUNT SETTINGS
 ═══════════════════════════════════════════ */
-.account-settings { margin-top: 0; }
+.account-settings { margin-top: 0; padding: 18px; }
 .account-actions {
   display: flex;
   gap: 10px;
