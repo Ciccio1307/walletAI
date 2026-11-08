@@ -9,6 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: [
         'walletAI_logo.png',
+        'logo-light.png',
+        'logo-dark.png',
         'icon-192.png',
         'icon-512.png',
         'icon-maskable-512.png',
@@ -78,7 +80,8 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        // Overridable so e2e tests can run against an isolated backend.
+        target: process.env.API_PROXY_TARGET || 'http://localhost:3001',
         changeOrigin: true,
       },
     },

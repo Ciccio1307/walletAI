@@ -15,7 +15,7 @@ function currentTx(overrides = {}) {
   };
 }
 
-function baseStats(tx) {
+function baseStats() {
   const now = new Date();
   return {
     counts: { all: 2, in: 0, out: 2, recurring: 0 },
@@ -40,7 +40,7 @@ function baseStats(tx) {
 describe('applyStatsDelta', () => {
   it('rimuove una transazione da tutti gli aggregati', () => {
     const tx = currentTx();
-    const next = applyStatsDelta(baseStats(tx), tx, -1);
+    const next = applyStatsDelta(baseStats(), tx, -1);
 
     expect(next.counts.all).toBe(1);
     expect(next.counts.out).toBe(1);
@@ -53,7 +53,7 @@ describe('applyStatsDelta', () => {
 
   it('è reversibile (undo)', () => {
     const tx = currentTx();
-    const stats = baseStats(tx);
+    const stats = baseStats();
     const next = applyStatsDelta(applyStatsDelta(stats, tx, -1), tx, 1);
 
     expect(next.counts.all).toBe(stats.counts.all);
@@ -63,13 +63,13 @@ describe('applyStatsDelta', () => {
 
   it('aggiorna il contatore dei ricorrenti', () => {
     const tx = currentTx({ recurring: 1 });
-    const next = applyStatsDelta(baseStats(tx), tx, -1);
+    const next = applyStatsDelta(baseStats(), tx, -1);
     expect(next.counts.recurring).toBe(0);
   });
 
   it('non va sotto zero', () => {
     const tx = currentTx();
-    const stats = baseStats(tx);
+    const stats = baseStats();
     stats.counts.all = 0;
     stats.counts.out = 0;
     const next = applyStatsDelta(stats, tx, -1);

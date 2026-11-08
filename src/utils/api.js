@@ -29,7 +29,18 @@ export async function clearApiCaches() {
   }
 }
 
-async function tryRefresh() {
+// Several requests can expire at the same moment (a page loads ~5 in
+// parallel): they all wait on the same refresh instead of sending one each.
+let refreshInFlight = null;
+
+function tryRefresh() {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function doRefresh() {
   const refreshToken = localStorage.getItem('refresh_token');
   if (!refreshToken) return false;
 

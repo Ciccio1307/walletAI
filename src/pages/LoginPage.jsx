@@ -86,7 +86,10 @@ export default function LoginPage() {
       <div className="login-card">
         <div className="login-header">
           <div className="login-logo">
-            <img src="/walletAI_logo.png" alt="WalletAI" />
+            <picture>
+              <source srcSet="/logo-dark.png" media="(prefers-color-scheme: dark)" />
+              <img src="/logo-light.png" alt="WalletAI" />
+            </picture>
           </div>
           <p className="login-subtitle">Gestisci le tue finanze con l'AI locale</p>
         </div>

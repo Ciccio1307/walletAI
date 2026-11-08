@@ -38,7 +38,10 @@ export default function NavBar() {
       <nav className={`navbar${scrolled ? ' scrolled' : ''}`}>
         <div className="navbar-inner">
           <div className="navbar-logo">
-            <img src="/walletAI_logo.png" alt="WalletAI" />
+            <picture>
+              <source srcSet="/logo-dark.png" media="(prefers-color-scheme: dark)" />
+              <img src="/logo-light.png" alt="WalletAI" />
+            </picture>
           </div>
 
           {/* Desktop-only tabs */}

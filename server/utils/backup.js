@@ -1,3 +1,4 @@
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import db from '../db.js';
 import { logger } from './logger.js';
 
@@ -8,6 +9,74 @@ let gistId = process.env.GITHUB_GIST_ID;
 
 function getToken() {
   return process.env.GITHUB_TOKEN;
+}
+
+// ── Encryption ────────────────────────────────────────────────────────────────
+// A secret Gist is readable by anyone who has its URL, so the snapshot (password
+// hashes + every transaction) is encrypted with AES-256-GCM when BACKUP_KEY is
+// set. The key is derived with scrypt and a random per-backup salt.
+
+const ENVELOPE_VERSION = 1;
+
+function deriveKey(secret, salt) {
+  return scryptSync(secret, salt, 32);
+}
+
+export function encryptBackup(plaintext, secret) {
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', deriveKey(secret, salt), iv);
+  const data = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  return JSON.stringify({
+    encrypted: true,
+    v: ENVELOPE_VERSION,
+    alg: 'aes-256-gcm',
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: data.toString('base64'),
+  });
+}
+
+export function decryptBackup(envelope, secret) {
+  const salt = Buffer.from(envelope.salt, 'base64');
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    deriveKey(secret, salt),
+    Buffer.from(envelope.iv, 'base64')
+  );
+  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(envelope.data, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+/**
+ * Accepts the raw Gist file content and returns the snapshot object.
+ * Plaintext backups (created before encryption existed) are still accepted.
+ */
+export function readBackupContent(content, secret = process.env.BACKUP_KEY) {
+  const parsed = JSON.parse(content);
+  if (!parsed?.encrypted) return parsed;
+  if (!secret) {
+    throw new Error('il backup è cifrato ma BACKUP_KEY non è impostata');
+  }
+  return JSON.parse(decryptBackup(parsed, secret));
+}
+
+let warnedPlaintext = false;
+
+function serializeSnapshot() {
+  const plaintext = JSON.stringify(snapshot());
+  const secret = process.env.BACKUP_KEY;
+  if (secret) return encryptBackup(plaintext, secret);
+
+  if (!warnedPlaintext) {
+    warnedPlaintext = true;
+    logger.warn('[backup] BACKUP_KEY non impostata: il backup su Gist è in chiaro e leggibile da chiunque abbia il link.');
+  }
+  return plaintext;
 }
 
 function snapshot() {
@@ -26,7 +95,7 @@ async function pushSnapshot() {
   const token = getToken();
   if (!token) return;
 
-  const content = JSON.stringify(snapshot());
+  const content = serializeSnapshot();
   const url = gistId ? `https://api.github.com/gists/${gistId}` : 'https://api.github.com/gists';
   const method = gistId ? 'PATCH' : 'POST';
 
@@ -63,8 +132,26 @@ async function pushSnapshot() {
 let inFlight = null;
 let dirty = false;
 
+// Set when the startup restore fails. The server then runs on an empty
+// database, and pushing a snapshot would overwrite the good backup with an
+// empty one, so writes to the Gist are suspended until the next restart.
+let blocked = false;
+let warnedBlocked = false;
+
+function blockBackups(reason) {
+  blocked = true;
+  logger.error(`[backup] Ripristino fallito (${reason}). Backup automatici SOSPESI per non sovrascrivere il Gist: correggi la configurazione e riavvia il server.`);
+}
+
 export function saveBackup() {
   if (!getToken()) return Promise.resolve();
+  if (blocked) {
+    if (!warnedBlocked) {
+      warnedBlocked = true;
+      logger.error('[backup] Salvataggio saltato: i backup sono sospesi dopo un ripristino fallito.');
+    }
+    return Promise.resolve();
+  }
   dirty = true;
 
   if (!inFlight) {
@@ -105,7 +192,7 @@ export async function restoreBackup() {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
-      logger.warn(`[backup] restore: GitHub ha risposto ${res.status}`);
+      blockBackups(`GitHub ha risposto ${res.status}`);
       return;
     }
 
@@ -113,7 +200,7 @@ export async function restoreBackup() {
     const content = data.files?.[FILENAME]?.content;
     if (!content) return;
 
-    const parsed = JSON.parse(content);
+    const parsed = readBackupContent(content);
     const users = parsed.users || [];
     const transactions = parsed.transactions || [];
     const keywords = parsed.keywords || [];
@@ -145,11 +232,15 @@ export async function restoreBackup() {
 
     logger.info(`[backup] Ripristinati: ${users.length} utenti, ${transactions.length} transazioni, ${budgets.length} budget, ${goals.length} obiettivi`);
   } catch (err) {
-    logger.error('[backup] restoreBackup error:', err.message);
+    blockBackups(err.message);
   }
 }
 
 // Export for tests / diagnostics.
 export function getGistId() {
   return gistId;
+}
+
+export function isBackupBlocked() {
+  return blocked;
 }

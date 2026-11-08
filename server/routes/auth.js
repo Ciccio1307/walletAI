@@ -20,9 +20,14 @@ const loginLimiter = rateLimit({
   message: { error: 'Troppi tentativi, riprova tra un minuto' },
 });
 
+// Configurable so end-to-end tests can register many users quickly.
+const registerLimit = Number(process.env.REGISTER_RATE_LIMIT) > 0
+  ? Number(process.env.REGISTER_RATE_LIMIT)
+  : 5;
+
 const registerLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 5,
+  limit: registerLimit,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Troppi tentativi, riprova tra un minuto' },
@@ -36,8 +41,12 @@ const refreshLimiter = rateLimit({
   message: { error: 'Troppe richieste, riprova tra un minuto' },
 });
 
+// Short-lived: the token lives in localStorage, so a stolen one must expire
+// quickly. The client refreshes it transparently (src/utils/api.js).
+const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '30m';
+
 function signAccessToken(userId, version) {
-  return jwt.sign({ userId, type: 'access', ver: version }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ userId, type: 'access', ver: version }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL });
 }
 
 function signRefreshToken(userId, version) {

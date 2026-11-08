@@ -151,6 +151,25 @@ describe('API', () => {
     expect(recurring.body.every((tx) => tx.recurring === 1)).toBe(true);
   });
 
+  it('importa conservando il flag ricorrente e scartando righe non valide', async () => {
+    const res = await api.post('/api/transactions/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send([
+        null,
+        { amount: 9.99, type: 'out', date: '01/10/2026', category: 'svago', description: 'abbonamento import', recurring: true },
+        { amount: -1, type: 'out', date: '01/10/2026' },
+      ]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ imported: 1, skipped: 2 });
+
+    const list = await api.get('/api/transactions?search=abbonamento%20import')
+      .set('Authorization', `Bearer ${token}`);
+    expect(list.body[0].recurring).toBe(1);
+
+    // Clean up so later count-based assertions are unaffected.
+    await api.delete(`/api/transactions/${list.body[0].id}`).set('Authorization', `Bearer ${token}`);
+  });
+
   it('restituisce statistiche aggregate', async () => {
     const res = await api.get('/api/transactions/stats?today=03/11/2026')
       .set('Authorization', `Bearer ${token}`);

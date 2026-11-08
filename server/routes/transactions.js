@@ -65,6 +65,7 @@ function validateTransactionInput(input) {
       raw_input: sanitize(String(body.raw_input ?? ''), 500) || '',
       source: normalizeSource(body.source),
       confidence: normalizeConfidence(body.confidence),
+      recurring: body.recurring === true || body.recurring === 1 || body.recurring === '1' ? 1 : 0,
     },
   };
 }
@@ -179,8 +180,8 @@ router.post('/import', (req, res) => {
   }
 
   const stmt = db.prepare(
-    `INSERT INTO transactions (user_id, amount, type, description, category, date, raw_input, source, confidence)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO transactions (user_id, amount, type, description, category, date, raw_input, source, confidence, recurring)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   const importMany = db.transaction((list) => {
@@ -193,8 +194,8 @@ router.post('/import', (req, res) => {
         skipped++;
         continue;
       }
-      const { amount, type, description, category, date, raw_input, source, confidence } = parsed.value;
-      stmt.run(req.userId, amount, type, description, category, date, raw_input, source, confidence);
+      const { amount, type, description, category, date, raw_input, source, confidence, recurring } = parsed.value;
+      stmt.run(req.userId, amount, type, description, category, date, raw_input, source, confidence, recurring);
       imported++;
     }
 

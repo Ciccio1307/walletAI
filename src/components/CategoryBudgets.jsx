@@ -20,20 +20,30 @@ export default function CategoryBudgets({ spending = {} }) {
         const map = {};
         rows.forEach((row) => { map[row.category] = row.budget_amount; });
         setBudgets(map);
+      } else {
+        showToast('Impossibile caricare i budget per categoria', 'error');
       }
+    } catch {
+      showToast('Errore di connessione: budget non caricati', 'error');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
 
   async function saveBudget(category) {
     const value = parseFloat(editVal);
-    const res = await apiFetch(`/api/user/category-budgets/${category}`, {
-      method: 'PUT',
-      body: JSON.stringify({ budget_amount: Number.isFinite(value) ? value : 0 }),
-    });
+    let res;
+    try {
+      res = await apiFetch(`/api/user/category-budgets/${category}`, {
+        method: 'PUT',
+        body: JSON.stringify({ budget_amount: Number.isFinite(value) ? value : 0 }),
+      });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    }
 
     if (res.ok) {
       setEditing(null);

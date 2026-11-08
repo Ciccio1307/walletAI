@@ -64,7 +64,9 @@ export default function AIInput({ onTransactionSaved }) {
           setLoading(false); setStatus('');
           return;
         }
-      } catch {}
+      } catch {
+        // Fall through: analyse the whole text as a single transaction.
+      }
     }
 
     setStatus('Analizzando…');

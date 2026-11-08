@@ -6,7 +6,7 @@
 
   <p>
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" />
-    <img src="https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white" />
+    <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" />
     <img src="https://img.shields.io/badge/Node.js-Express-339933?logo=node.js&logoColor=white" />
     <img src="https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white" />
     <img src="https://img.shields.io/badge/AI-Ollama%20%7C%20Groq%20%7C%20OpenRouter-black" />
@@ -34,7 +34,7 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 ## Features
 
 ### Core
-- **Authentication** — registration and login with JWT (7d access + 30d refresh), password hashed with bcrypt; `token_version` revokes every token on logout/password change
+- **Authentication** — registration and login with JWT (30-minute access token, refreshed transparently + 30-day refresh token), password hashed with bcrypt; `token_version` revokes every token on logout/password change
 - **Hardened API** — rate limiting on login (10 failed req/min), register (5/min), token refresh (30/min) and text parsing (30/min per user), secure HTTP headers via helmet, strict validation of dates/amounts/enums, JSON error handler (no stack traces), CSP
 - **3-level AI parsing** — AI (Ollama/Groq/OpenRouter) → keyword dictionary → manual form; AI responses are validated and cached for 10 minutes
 - **Multi-transaction parsing** — type `"sushi 22€, taxi 8€, cinema 15€"` and all three are parsed and saved at once
@@ -73,7 +73,7 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18 + Vite 5 + React Router 7 |
+| Frontend | React 18 + Vite 8 + React Router 7 |
 | Backend | Node.js + Express |
 | Database | SQLite via `better-sqlite3` (synchronous) |
 | Authentication | JWT (`jsonwebtoken`) + `bcryptjs` |
@@ -81,7 +81,7 @@ Parsing works through a **3-level system** that always guarantees a result: it f
 | Cloud AI | Groq · OpenRouter (OpenAI-compatible API) |
 | Styling | Plain CSS with CSS variables, DM Sans + DM Serif Display |
 | PWA | `vite-plugin-pwa` + Workbox |
-| Tests | Vitest |
+| Tests | Vitest (unit + API) · Playwright (end-to-end, desktop + mobile + dark mode) · ESLint |
 | Deploy | Frontend → Netlify · Backend → Render |
 
 No CSS framework, no UI library.
@@ -145,7 +145,8 @@ walletai/
 │   │   └── useKeyboardShortcuts.js
 │   ├── utils/
 │   │   ├── api.js                # apiFetch + token refresh + cache clearing
-│   │   └── stats.js              # Optimistic aggregate updates
+│   │   ├── stats.js              # Optimistic aggregate updates
+│   │   └── csv.js                # CSV export/import (quoted newlines, formula-injection safe)
 │   ├── pages/
 │   │   ├── LoginPage.jsx         # Sign in / Sign up
 │   │   ├── ProfilePage.jsx       # Stats, goals, budgets, account settings, CSV
@@ -170,7 +171,9 @@ walletai/
 │       ├── global.css            # CSS variables, reset, base classes
 │       └── components.css        # Component styles + responsive + dark mode
 ├── public/
-│   ├── walletAI_logo.png
+│   ├── walletAI_logo.png         # Full logo (README, social preview)
+│   ├── logo-light.png            # Cropped transparent logo for the UI
+│   ├── logo-dark.png             # …and its dark-mode variant
 │   ├── icon-192.png              # PWA icons (square)
 │   ├── icon-512.png
 │   ├── icon-maskable-512.png
@@ -182,11 +185,18 @@ walletai/
 │   ├── dateParser.test.js        # Italian dates + client timezone
 │   ├── validate.test.js          # Date/enum validation
 │   ├── stats.test.js             # Optimistic delete/undo aggregates
+│   ├── backup.test.js            # Backup encryption + restore safety
+│   ├── csv.test.js               # CSV parsing/escaping
 │   └── api.test.js               # API integration tests (supertest)
-├── .github/workflows/ci.yml      # Tests + build on push/PR
+├── e2e/
+│   ├── start-server.js           # Real API on a throw-away database
+│   └── app.spec.js               # Playwright end-to-end tests
+├── .github/workflows/ci.yml      # Lint + tests + build, and e2e job, on push/PR
 ├── index.html
 ├── vite.config.js                # Dev proxy /api → :3001 + PWA manifest + Workbox
 ├── vitest.config.js
+├── playwright.config.js
+├── eslint.config.js
 ├── .nvmrc                        # Node.js version pin (v20)
 ├── .env.example
 ├── .gitignore
@@ -357,9 +367,14 @@ npm run dev
 ### 5. Run tests
 
 ```bash
-npm test        # unit + API integration tests
-npm run build   # production build
-npm run check   # tests + build
+npm run lint      # ESLint
+npm test          # unit + API integration tests (Vitest)
+npm run build     # production build
+npm run check     # lint + tests + build
+
+# End-to-end (builds the app and starts an isolated backend on a temp DB)
+npx playwright install chromium   # first time only
+npm run test:e2e
 ```
 
 ---
@@ -420,6 +435,7 @@ OLLAMA_API_KEY    = gsk_...
 # Auto backup (optional but recommended — see section below):
 GITHUB_TOKEN      = ghp_...
 GITHUB_GIST_ID    = (leave empty on first deploy, fill after)
+BACKUP_KEY        = (random 32-byte base64 string — encrypts the backup)
 ```
 
 5. Click **Deploy** → copy the assigned URL (e.g. `https://walletai-abc123.onrender.com`)
@@ -464,7 +480,10 @@ The backup is **coalesced/debounced** (a multi-transaction save produces one sna
 ```
 GITHUB_TOKEN   = ghp_your_token_here
 GITHUB_GIST_ID = (leave empty for now)
+BACKUP_KEY     = output of: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
+
+With `BACKUP_KEY` set, the snapshot is encrypted with **AES-256-GCM** (scrypt-derived key, random salt and IV per backup) before it reaches GitHub. **Keep a copy of the key somewhere safe**: without it the backup cannot be restored. Older plaintext backups are still restored, and the next save replaces them with an encrypted one.
 
 **3. Deploy.** On first transaction saved, the server logs:
 ```
@@ -475,7 +494,9 @@ GITHUB_GIST_ID = (leave empty for now)
 
 > If `GITHUB_TOKEN` is not set the backup is silently skipped and the app works normally.
 
-> ⚠️ A secret Gist is **unlisted, not private**: anyone who has its URL can read it without logging in. The backup contains password hashes and every transaction, so never share the Gist ID or URL.
+> ⚠️ A secret Gist is **unlisted, not private**: anyone who has its URL can read it without logging in. Always set `BACKUP_KEY`; without it the server logs a warning and the backup (password hashes and every transaction) is stored in plain text.
+
+> 🛡️ If the restore fails at startup (GitHub unreachable, wrong or missing `BACKUP_KEY`), automatic backups are **suspended** until the next restart. Otherwise the first write on the empty database would overwrite the good backup with an empty one.
 
 ---
 

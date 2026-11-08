@@ -10,6 +10,7 @@ import CategoryBudgets from '../components/CategoryBudgets.jsx';
 import { apiFetch, clearSession } from '../utils/api.js';
 import SkeletonCard from '../components/SkeletonCard.jsx';
 import { useToast } from '../components/Toast.jsx';
+import { csvEscape, csvUnescapeFormula, parseCSV } from '../utils/csv.js';
 
 function initials(name = '') {
   return String(name)
@@ -33,35 +34,6 @@ function todayParam() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
-}
-
-function parseCSVLine(line) {
-  const cols = [];
-  let current = '';
-  let inQuote = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuote && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuote = !inQuote;
-      }
-    } else if (ch === ',' && !inQuote) {
-      cols.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  cols.push(current);
-  return cols;
-}
-
-function csvEscape(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
 export default function ProfilePage() {
@@ -151,7 +123,7 @@ export default function ProfilePage() {
     const all = Array.isArray(body) ? body : (body.data || []);
 
     const meta = `#BACKUP,${csvEscape(user.username)},${csvEscape(user.email)},${csvEscape(user.full_name)},${user.initial_budget || 0}`;
-    const header = 'data,descrizione,categoria,tipo,importo,source,confidence,raw_input';
+    const header = 'data,descrizione,categoria,tipo,importo,source,confidence,raw_input,ricorrente';
     const rows = all.map((t) => [
       t.date,
       csvEscape(t.description || ''),
@@ -161,6 +133,7 @@ export default function ProfilePage() {
       t.source || 'manual',
       t.confidence || 'low',
       csvEscape(t.raw_input || ''),
+      t.recurring ? 1 : 0,
     ].join(','));
 
     const csv = `\uFEFF${[meta, header, ...rows].join('\r\n')}`;
@@ -178,12 +151,10 @@ export default function ProfilePage() {
     if (!file) return;
 
     const text = await file.text();
-    const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
     const rows = [];
 
-    for (const line of lines) {
-      if (!line.trim() || line.startsWith('#') || line.startsWith('data,')) continue;
-      const cols = parseCSVLine(line);
+    for (const cols of parseCSV(text)) {
+      if (cols[0].startsWith('#') || cols[0] === 'data') continue;
       if (cols.length < 5) continue;
 
       const amount = parseFloat(cols[4]);
@@ -191,13 +162,14 @@ export default function ProfilePage() {
 
       rows.push({
         date: cols[0],
-        description: cols[1],
+        description: csvUnescapeFormula(cols[1]),
         category: cols[2],
         type: cols[3],
         amount,
         source: cols[5] || 'manual',
         confidence: cols[6] || 'low',
-        raw_input: cols[7] || '',
+        raw_input: csvUnescapeFormula(cols[7] || ''),
+        recurring: cols[8] === '1',
       });
     }
 

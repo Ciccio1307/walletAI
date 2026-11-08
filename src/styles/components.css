@@ -28,7 +28,9 @@
   gap: 12px;
 }
 .navbar-logo { display: flex; align-items: center; }
-.navbar-logo img { height: 34px; width: auto; display: block; }
+/* Cropped, transparent logo (public/logo-light.png / logo-dark.png). */
+.navbar-logo picture { display: block; }
+.navbar-logo img { height: 44px; width: auto; display: block; }
 
 .navbar-tabs { display: flex; gap: 4px; }
 .navbar-tab {
@@ -127,7 +129,7 @@
 }
 .login-header { text-align: center; margin-bottom: 24px; }
 .login-logo { display: flex; justify-content: center; margin-bottom: 8px; }
-.login-logo img { width: 180px; height: auto; display: block; }
+.login-logo img { width: 128px; height: auto; display: block; }
 .login-subtitle { font-size: 14px; color: var(--muted); }
 
 .login-tabs {
@@ -488,15 +490,18 @@
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
-  border-top: 1px solid rgba(255,255,255,0.12);
-  padding-top: 14px;
+  /* Dark backdrop: on the mid-teal gradient the coloured totals were at
+     ~1.4–1.8:1 contrast; with it every value is above 5:1 (WCAG AA). */
+  background: rgba(4, 33, 26, 0.45);
+  border-radius: 12px;
+  padding: 12px 8px;
   position: relative;
 }
 .wallet-stat-item  { text-align: center; }
-.wallet-stat-label { font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 4px; }
+.wallet-stat-label { font-size: 11px; color: rgba(255,255,255,0.78); margin-bottom: 4px; }
 .wallet-stat-value { font-size: clamp(13px, 4vw, 16px); font-weight: 600; }
-.wallet-stat-value.in  { color: #68D391; }
-.wallet-stat-value.out { color: #FC8181; }
+.wallet-stat-value.in  { color: #C9F7DD; }
+.wallet-stat-value.out { color: #FFD1D1; }
 
 /* ═══════════════════════════════════════════
    AI INPUT
@@ -617,7 +622,9 @@
 .preview-cancel:hover { color: var(--red); border-color: var(--red); }
 
 .preview-edit-link {
-  width: 100%;
+  /* Shares the second row with the ⭐ button instead of pushing it alone
+     onto a third line. */
+  flex: 1 1 calc(100% - 52px);
   text-align: center;
   font-size: 13px;
   color: var(--muted);
@@ -883,7 +890,7 @@
 
   /* Login card edge-to-edge feel */
   .login-card { padding: 28px 20px; border-radius: 20px; }
-  .login-logo img { width: 160px; }
+  .login-logo img { width: 112px; }
 
   /* Stack stats 2-col remains, but shrink padding */
   .stats-grid { gap: 8px; }
@@ -1401,6 +1408,9 @@
   padding-right: 10px;
 }
 .toast-action-btn {
+  /* .toast is pointer-events: none so it never blocks the page; the action
+     button must opt back in, or "Annulla" can never be clicked. */
+  pointer-events: auto;
   background: rgba(255,255,255,0.22);
   border: 1px solid rgba(255,255,255,0.35);
   color: #fff;

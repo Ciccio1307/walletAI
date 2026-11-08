@@ -11,9 +11,14 @@ export default function KeywordManager() {
   useEffect(() => { loadKeywords(); }, []);
 
   async function loadKeywords() {
-    const res = await apiFetch('/api/user/keywords');
-    const data = await res.json();
-    setKeywords(Array.isArray(data) ? data : []);
+    try {
+      const res = await apiFetch('/api/user/keywords');
+      if (!res.ok) { setError('Impossibile caricare le parole chiave'); return; }
+      const data = await res.json();
+      setKeywords(Array.isArray(data) ? data : []);
+    } catch {
+      setError('Errore di connessione: parole chiave non caricate');
+    }
   }
 
   async function addKeyword(e) {
@@ -21,22 +26,32 @@ export default function KeywordManager() {
     setError('');
     if (!form.keyword.trim()) { setError('Inserisci una parola chiave'); return; }
 
-    const res = await apiFetch('/api/user/keywords', {
-      method: 'POST',
-      body: JSON.stringify(form),
-    });
-    if (res.ok) {
-      setForm({ keyword: '', category: 'cibo', type: 'out' });
-      loadKeywords();
-    } else {
-      const d = await res.json();
-      setError(d.error || 'Errore');
+    try {
+      const res = await apiFetch('/api/user/keywords', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        setForm({ keyword: '', category: 'cibo', type: 'out' });
+        loadKeywords();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || 'Errore');
+      }
+    } catch {
+      setError('Errore di connessione');
     }
   }
 
   async function deleteKeyword(id) {
-    await apiFetch(`/api/user/keywords/${id}`, { method: 'DELETE' });
-    setKeywords(k => k.filter(x => x.id !== id));
+    setError('');
+    try {
+      const res = await apiFetch(`/api/user/keywords/${id}`, { method: 'DELETE' });
+      if (!res.ok) { setError('Eliminazione non riuscita'); return; }
+      setKeywords(k => k.filter(x => x.id !== id));
+    } catch {
+      setError('Errore di connessione');
+    }
   }
 
   return (

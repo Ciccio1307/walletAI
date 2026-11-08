@@ -12,9 +12,14 @@ export default function GoalsCard({ monthlySavings = 0 }) {
   const [form, setForm]             = useState({ name: '', target_amount: '', current_amount: '', deadline: '' });
 
   const load = useCallback(async () => {
-    const res = await apiFetch('/api/goals');
-    if (res.ok) setGoals(await res.json());
-  }, []);
+    try {
+      const res = await apiFetch('/api/goals');
+      if (res.ok) setGoals(await res.json());
+      else showToast('Impossibile caricare gli obiettivi', 'error');
+    } catch {
+      showToast('Errore di connessione: obiettivi non caricati', 'error');
+    }
+  }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -23,16 +28,23 @@ export default function GoalsCard({ monthlySavings = 0 }) {
   async function addGoal(e) {
     e.preventDefault();
     setSaving(true);
-    const res = await apiFetch('/api/goals', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: form.name,
-        target_amount: parseFloat(form.target_amount),
-        current_amount: parseFloat(form.current_amount) || 0,
-        deadline: form.deadline || null,
-      }),
-    });
-    setSaving(false);
+    let res;
+    try {
+      res = await apiFetch('/api/goals', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.name,
+          target_amount: parseFloat(form.target_amount),
+          current_amount: parseFloat(form.current_amount) || 0,
+          deadline: form.deadline || null,
+        }),
+      });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    } finally {
+      setSaving(false);
+    }
     if (res.ok) {
       setShowAdd(false);
       setForm({ name: '', target_amount: '', current_amount: '', deadline: '' });
@@ -49,10 +61,16 @@ export default function GoalsCard({ monthlySavings = 0 }) {
       showToast('Importo non valido', 'error');
       return;
     }
-    const res = await apiFetch(`/api/goals/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ current_amount: val }),
-    });
+    let res;
+    try {
+      res = await apiFetch(`/api/goals/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ current_amount: val }),
+      });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    }
     if (res.ok) { setEditingId(null); load(); }
     else {
       const body = await res.json().catch(() => ({}));
@@ -61,7 +79,13 @@ export default function GoalsCard({ monthlySavings = 0 }) {
   }
 
   async function deleteGoal(id) {
-    const res = await apiFetch(`/api/goals/${id}`, { method: 'DELETE' });
+    let res;
+    try {
+      res = await apiFetch(`/api/goals/${id}`, { method: 'DELETE' });
+    } catch {
+      showToast('Errore di connessione', 'error');
+      return;
+    }
     if (res.ok) setGoals((prev) => prev.filter((goal) => goal.id !== id));
     else showToast('Errore durante l\'eliminazione', 'error');
   }
